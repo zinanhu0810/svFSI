@@ -1,4 +1,4 @@
-!
+
 ! Copyright (c) Stanford University, The Regents of the University of
 !               California, and others.
 !
@@ -45,14 +45,14 @@
      2   Dg(tDof,tnNo)
 
       LOGICAL :: vmsStab
-      INTEGER(KIND=IKIND) a, e, g, l, Ac, eNoN, cPhys, iFn, nFn
+      INTEGER(KIND=IKIND) a, e, g, l, Ac, eNoN, cPhys, iFn, nFn, cNE
       REAL(KIND=RKIND) w, Jac, ksix(nsd,nsd)
       TYPE(fsType) :: fs(2)
 
-      INTEGER(KIND=IKIND), ALLOCATABLE :: ptr(:)
+      INTEGER(KIND=IKIND), ALLOCATABLE :: ptr(:),lIEN(:)
       REAL(KIND=RKIND), ALLOCATABLE :: xl(:,:), al(:,:), yl(:,:),
-     2   dl(:,:), bfl(:,:), fN(:,:), pS0l(:,:), pSl(:), ya_l(:),
-     3   lR(:,:), lK(:,:,:), lKd(:,:,:)
+     2   dl(:,:), bfl(:,:), fN(:,:), pS0l(:,:), pSl(:), tmXl(:),
+     3   ya_l(:), lR(:,:), lK(:,:,:), lKd(:,:,:)
       REAL(KIND=RKIND), ALLOCATABLE :: xwl(:,:), xql(:,:), Nwx(:,:),
      2   Nwxx(:,:), Nqx(:,:)
 
@@ -71,13 +71,42 @@
 
       ALLOCATE(ptr(eNoN), xl(nsd,eNoN), al(tDof,eNoN), yl(tDof,eNoN),
      2   dl(tDof,eNoN), bfl(nsd,eNoN), fN(nsd,nFn), pS0l(nsymd,eNoN),
-     3   pSl(nsymd), ya_l(eNoN), lR(dof,eNoN), lK(dof*dof,eNoN,eNoN),
-     4   lKd(dof*nsd,eNoN,eNoN))
+     3   pSl(nsymd), tmXl(eNoN), ya_l(eNoN), lR(dof,eNoN),
+     4   lK(dof*dof,eNoN,eNoN), lKd(dof*nsd,eNoN,eNoN))
+
+      
 
 !     Loop over all elements of mesh
       DO e=1, lM%nEl
+         cNE = e
+         lIEN = lM%IEN(1:eNoN,e)
+
+!         cNE = 0._IKIND
+!        lIEN = 1._IKIND
+         
          cDmn  = DOMAIN(lM, cEq, e)
          cPhys = eq(cEq)%dmn(cDmn)%phys
+
+!         IF (cNE .EQ. 1) THEN
+!            PRINT*,eq(cEq)%dmn(cDmn)%phys .EQ. phys_struct
+!            PRINT*,eq(cEq)%dmn(cDmn)%phys .EQ. phys_FSI
+!            PRINT*,eq(cEq)%dmn(cDmn)%phys .EQ. phys_fluid
+!         END IF
+
+         IF (cPhys .EQ. phys_struct) THEN
+            cNE = e
+            lIEN = lM%IEN(1:eNoN,e)
+!            IF (cNE .EQ. 1) PRINT*, lM%IEN(1:eNoN,e)
+!            IF (cNE .EQ. 1) THEN
+!               PRINT*, lM%nEl
+!               PRINT*,"length of IEN", SIZE(lM%IEN, dim=1)
+!               PRINT*,"length of IEN", SIZE(lM%IEN, dim=2)
+!               PRINT*, eq(cEq)%dmn(cDmn)%phys .EQ. phys_struct
+!            END IF
+            
+         END IF 
+
+         
          IF ((cPhys .NE. phys_fluid)  .AND.
      2       (cPhys .NE. phys_lElas)  .AND.
      3       (cPhys .NE. phys_struct) .AND.
@@ -104,7 +133,16 @@
                END DO
             END IF
             IF (ALLOCATED(pS0)) pS0l(:,a) = pS0(:,Ac)
-            IF (cem%cpld) ya_l(a) = cem%Ya(Ac)
+            IF (ecCpld) THEN
+               IF (ALLOCATED(lM%tmX)) THEN
+                  tmXl(a) = lM%tmX(lM%lN(Ac))
+               END IF
+               IF (ALLOCATED(ec_Ya)) THEN
+                  ya_l(a) = ec_Ya(Ac)
+               ELSE
+                  ya_l(a) = eq(cEq)%dmn(cDmn)%ec%Ya
+               END IF
+            END IF
          END DO
 
 !        For FSI, fluid domain should be in the current configuration
@@ -161,12 +199,13 @@
 
                CASE (phys_struct)
                   CALL STRUCT3D(fs(1)%eNoN, nFn, w, fs(1)%N(:,g), Nwx,
-     2               al, yl, dl, bfl, fN, pS0l, pSl, ya_l, lR, lK)
+     2               al, yl, dl, bfl, fN, pS0l, pSl, tmXl, ya_l, lR, lK,
+     3               lIEN, cNE)
 
                CASE (phys_ustruct)
                   CALL USTRUCT3D_M(vmsStab, fs(1)%eNoN, fs(2)%eNoN, nFn,
      2               w, Jac, fs(1)%N(:,g), fs(2)%N(:,g), Nwx, al, yl,
-     3               dl, bfl, fN, ya_l, lR, lK, lKd)
+     3               dl, bfl, fN, tmXl, ya_l, lR, lK, lKd, lIEN, cNE)
 
                END SELECT
 
@@ -183,12 +222,13 @@
 
                CASE (phys_struct)
                   CALL STRUCT2D(fs(1)%eNoN, nFn, w, fs(1)%N(:,g), Nwx,
-     2               al, yl, dl, bfl, fN, pS0l, pSl, ya_l, lR, lK)
+     2               al, yl, dl, bfl, fN, pS0l, pSl, tmXl, ya_l, lR, lK,
+     3               lIEN, cNE)
 
                CASE (phys_ustruct)
                   CALL USTRUCT2D_M(vmsStab, fs(1)%eNoN, fs(2)%eNoN, nFn,
      2               w, Jac, fs(1)%N(:,g), fs(2)%N(:,g), Nwx, al, yl,
-     3               dl, bfl, fN, ya_l, lR, lK, lKd)
+     3               dl, bfl, fN, tmXl, ya_l, lR, lK, lKd, lIEN, cNE)
 
                END SELECT
             END IF
@@ -260,8 +300,8 @@
 #endif
       END DO ! e: loop
 
-      DEALLOCATE(ptr, xl, al, yl, dl, bfl, fN, pS0l, pSl, ya_l, lR, lK,
-     2   lKd)
+      DEALLOCATE(ptr, xl, al, yl, dl, bfl, fN, pS0l, pSl, tmXl, ya_l,
+     2    lR, lK, lKd)
 
       CALL DESTROY(fs(1))
       CALL DESTROY(fs(2))

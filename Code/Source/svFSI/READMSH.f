@@ -46,7 +46,7 @@
 
       CHARACTER, PARAMETER :: dSym(3) = (/"X","Y","Z"/)
 
-      LOGICAL :: flag
+      LOGICAL :: flag, fib_dir
       INTEGER(KIND=IKIND) :: i, j, iM, iFa, a, b, Ac, e, lDof, lnNo
       REAL(KIND=RKIND) :: maxX(nsd), minX(nsd), fibN(nsd), rtmp
       CHARACTER(LEN=stdL) :: ctmp, fExt
@@ -129,13 +129,12 @@
          ALLOCATE(x(nsd,gtnNo))
          x = gX
 
-!        Checks for shell elements
+!     Checks for shell elements
          DO iM=1, nMsh
             IF (msh(iM)%lShl) THEN
-               IF (msh(iM)%eType.NE.eType_NRB .AND.
-     2             msh(iM)%eType.NE.eType_TRI3) THEN
-                  err = "Shell elements can be either triangles "//
-     2               "or C1-NURBS"
+               IF (msh(iM)%eType .EQ. eType_QUD4) THEN
+                  err = "Shell elements cannot be bilinear quads. "//
+     2               "Use higher-order quads, triangles, or NURBS."
                END IF
                IF (msh(iM)%eType .EQ. eType_NRB) THEN
                   DO i=1, nsd-1
@@ -143,10 +142,10 @@
      2                  "NURBS for shell elements should be p > 1"
                   END DO
                END IF
-c               IF (msh(iM)%eType .EQ. eType_TRI) THEN
-c                  IF (.NOT.cm%seq()) err = "Triangular shell elements"//
-c     2               " should be run sequentially"
-c               END IF
+               IF (msh(iM)%eType .EQ. eType_TRI3) THEN
+                  IF (.NOT.cm%seq()) err = "Shells with linear "//
+     2               "triangles should be run sequentially"
+               END IF
             END IF
          END DO
 
@@ -170,6 +169,8 @@ c               END IF
          END DO
       END IF ! resetSim
 
+      CALL SETRISPROJECTOR(list)
+
 !     Examining the existance of projection faces and setting %gN.
 !     Reseting gtnNo and recounting nodes that are not duplicated
       gtnNo = 0
@@ -188,6 +189,7 @@ c               END IF
      2         msh(iM)%gpN(a) = msh(iM)%gN(a)
          END DO
       END DO
+
       DEALLOCATE(x)
       ALLOCATE(x(nsd,gtnNo))
       IF (avNds%n .NE. 0) err = "There are still nodes in the stack"
@@ -263,6 +265,8 @@ c               END IF
          END DO
       END DO
 
+
+
       IF (resetSim) THEN
          lDof = size(rmsh%Y0,1)
          lnNo = size(rmsh%Y0,2)
@@ -331,53 +335,112 @@ c               END IF
          END DO
       END IF
 
-!     Read fiber orientation
-      flag = .FALSE.
+!     Read fiber orientation. Here we will try to load fibers in
+!     multiple ways. First we will attempt to read fibers from a single
+!     file. The code will look for variables named as "FIB_DIR1",
+!     "FIB_DIR2", etc. in a single vtu file.
+!     If not found, the code will then search for multiple fiber files
+!     (vtu format) with fiber direction variable named as "FIB_DIR".
+!     Otherwise, we will search for a uniform fiber vector with the
+!     keyword "Fiber direction".
+      dbg = " Checking for any fiber directions"
       DO iM=1, nMsh
-         lPM => list%get(msh(iM)%name,"Add mesh",iM)
-         j = lPM%srch("Fiber direction file path")
-         IF (j .EQ. 0) j = lPM%srch("Fiber direction")
-         IF (j .NE. 0) THEN
-            flag = .TRUE.
-            EXIT
+         msh(iM)%nFn = 0
+
+!        First attempt to read fibers from a single vtu file.
+         fib_dir = .FALSE.
+         lPM => list%get(msh(iM)%name, "Add mesh", iM)
+
+!        Check if num fiber directions are provided by the user
+         lPtr => lPM%get(msh(iM)%nFn, "Number of fiber directions")
+
+!        If not, the code will try to compute nFn from the variable
+!        names in the vtu file
+         lPtr => lPM%get(ctmp, "Fiber directions file path")
+         IF (ASSOCIATED(lPtr)) THEN
+            IF (rmsh%isReqd) err = "Fiber directions read from"//
+     2         " a file is not allowed with remeshing"
+            CALL READFIBNFSF(msh(iM), ctmp)
+            IF (ALLOCATED(msh(iM)%fN)) fib_dir = .TRUE.
+         END IF
+
+!        If the fibers are not found, we will try searching for multiple
+!        fiber files
+         IF (.NOT.fib_dir) THEN
+            lPM => list%get(msh(iM)%name, "Add mesh", iM)
+            msh(iM)%nFn = lPM%srch("Fiber direction file path")
+
+            IF (msh(iM)%nFn .NE. 0) THEN
+               fib_dir = .TRUE.
+               IF (rmsh%isReqd) err = "Fiber directions read from "//
+     2            "file is not allowed with remeshing"
+               ALLOCATE(msh(iM)%fN(nsd*msh(iM)%nFn,msh(iM)%gnEl))
+               msh(iM)%fN = 0._RKIND
+
+               DO i=1, msh(iM)%nFn
+                  lPtr => lPM%get(cTmp, "Fiber direction file path", i)
+                  CALL READFIBNFF(msh(iM), cTmp, "FIB_DIR", i)
+               END DO
+            END IF ! msh%nFn
+         END IF ! fib_dir
+
+!        If fibers are still not found, look for a prescribed constant
+!        vector
+         IF (.NOT.fib_dir) THEN
+            lPM => list%get(msh(iM)%name, "Add mesh", iM)
+            msh(iM)%nFn = lPM%srch("Fiber direction")
+
+            IF (msh(iM)%nFn .NE. 0) THEN
+               fib_dir = .TRUE.
+               ALLOCATE(msh(iM)%fN(nsd*msh(iM)%nFn,msh(iM)%gnEl))
+               msh(iM)%fN = 0._RKIND
+
+               DO i=1, msh(iM)%nFn
+                  lPtr => lPM%get(fibN, "Fiber direction", i)
+                  b = (i-1)*nsd
+                  DO e=1, msh(iM)%gnEl
+                     DO j=1, nsd
+                        msh(iM)%fN(b+j,e) = fibN(j)
+                     END DO
+                  END DO
+               END DO
+            END IF ! msh(iM)%fN
+         END IF ! fib_dir
+
+         IF (fib_dir) THEN
+            std = " Found "//STR(msh(iM)%nFn)//" fiber directions"//
+     2         " for mesh <"//TRIM(msh(iM)%name)//">"
+
+!           Normalizing fiber directions
+            DO e=1, msh(iM)%gnEl
+               DO i=1, msh(iM)%nFn
+                  b = (i-1)*nsd
+                  fibN = msh(iM)%fN(b+1:i*nsd,e)
+                  rtmp = SQRT(NORM(fibN))
+                  IF (.NOT.ISZERO(rtmp)) THEN
+                     msh(iM)%fN(b+1:i*nsd,e) = fibN / rtmp
+                  END IF
+               END DO
+            END DO
          END IF
       END DO
 
-      IF (flag) THEN
-         DO iM=1, nMsh
-            lPM => list%get(msh(iM)%name,"Add mesh",iM)
-
-            msh(iM)%nFn = lPM%srch("Fiber direction file path")
-            IF (msh(iM)%nFn .NE. 0) THEN
-               IF (rmsh%isReqd) err = "Fiber directions read from "//
-     2            "file is not allowed with remeshing"
-               ALLOCATE(msh(iM)%fN(msh(iM)%nFn*nsd,msh(iM)%gnEl))
-               msh(iM)%fN = 0._RKIND
-               DO i=1, msh(iM)%nFn
-                  lPtr => lPM%get(cTmp,
-     2               "Fiber direction file path", i)
-                  IF (ASSOCIATED(lPtr))
-     2               CALL READFIBNFF(msh(iM), cTmp, "FIB_DIR", i)
-               END DO
-            ELSE
-               msh(iM)%nFn = lPM%srch("Fiber direction")
-               IF (msh(iM)%nFn .NE. 0) THEN
-                  ALLOCATE(msh(iM)%fN(msh(iM)%nFn*nsd,msh(iM)%gnEl))
-                  msh(iM)%fN = 0._RKIND
-                  DO i=1, msh(iM)%nFn
-                     lPtr => lPM%get(fibN, "Fiber direction", i)
-                     rtmp = SQRT(NORM(fibN))
-                     IF (.NOT.ISZERO(rtmp)) fibN(:) = fibN(:)/rtmp
-                     DO e=1, msh(iM)%gnEl
-                        msh(iM)%fN((i-1)*nsd+1:i*nsd,e) = fibN(1:nsd)
-                     END DO
-                  END DO
-               END IF
-            END IF
-         END DO
-      ELSE
-         msh(:)%nFn = 0
-      END IF
+!     Read transmural coordinate for heterohenous orthotropic active
+!     strain type excitation-contraction coupling
+      DO iM=1, nMsh
+         lPM => list%get(msh(iM)%name,"Add mesh",iM)
+         lPtr => lPM%get(ctmp, "Transmural coordinate file path")
+         IF (ASSOCIATED(lPtr)) THEN
+            ALLOCATE(msh(iM)%tmX(msh(iM)%gnNo),
+     2         msh(iM)%x(1,msh(iM)%gnNo))
+            msh(iM)%x = 0._RKIND
+            CALL READVTUPDATA(msh(iM), ctmp, "Phi_EPI", 1, 1)
+            DO a=1, msh(iM)%gnNo
+               msh(iM)%tmX(a) = msh(iM)%x(1,a)
+            END DO
+            DEALLOCATE(msh(iM)%x)
+         END IF
+      END DO
 
 !     Read prestress data
       flag = .FALSE.
@@ -453,6 +516,22 @@ c               END IF
                lPtr => lPM%get(cntctM%al,
      2            "Min norm of face normals (alpha)",1,lb=0._RKIND,
      3            ub=1._RKIND)
+            CASE ("potential")
+               cntctM%cType = cntctM_potential
+               lPtr => lPM%get(cntctM%k,
+     2            "k", 1, ll=0._RKIND)
+               lPtr => lPM%get(cntctM%p,
+     2            "p", 1, lb=4._RKIND)
+               lPtr => lPM%get(cntctM%Rin,
+     2            "Rin", 1, lb=0._RKIND)
+               lPtr => lPM%get(cntctM%Rout,
+     2            "Rout", 1, lb=0._RKIND)
+               IF (cntctM%Rout .LT. cntctM%Rin) err =
+     2            "Choose Rout > Rin for proper contact penalization"
+               lPtr => lPM%get(cntctM%gap,
+     2            "gap", 1, lb=0._RKIND)
+               lPtr => lPM%get(cntctM%c,
+     2            "c", 1, lb=0._RKIND)
             CASE DEFAULT
                err = "Undefined contact model"
             END SELECT
@@ -461,6 +540,260 @@ c               END IF
 
       RETURN
       END SUBROUTINE READMSH
+
+!####################################################################
+!     This routines associates two faces with each other for the RIS proj
+      SUBROUTINE SETRISPROJECTOR(list)
+      USE COMMOD
+      USE LISTMOD
+      USE ALLFUN
+      IMPLICIT NONE
+      TYPE(listType), INTENT(INOUT) :: list
+
+      INTEGER(KIND=IKIND) iM, jM, iFa, jFa, nPrj, iPrj, nStk, i, j
+      REAL(KIND=RKIND) tol
+      CHARACTER(LEN=stdL) ctmpi, ctmpj
+C       TYPE(stackType) lPrj
+      TYPE(listType), POINTER :: lPtr, lPP
+
+      nStk = 0
+      nPrj = list%srch("Add RIS projection")
+
+!     This is something still to define, ideally we need a connection from  
+!     the local nodes on one mesh and the global id on the other. 
+!     ?? what if they belong to differnt processors ?? 
+
+      IF (nPrj .GT. 0) THEN
+         risFlag = .TRUE.
+
+         ALLOCATE(RIS)
+         RIS%nbrRIS = nPrj
+         ALLOCATE( RIS%lst(2,2,nPrj) )
+         RIS%lst(2,2,nPrj) = 0
+         write(*,*)" Number of RIS surface: ", RIS%nbrRIS  
+
+      END IF
+
+      IF(.NOT.risFlag) RETURN
+
+!     Create nStk = total number of nodes to match at the RIS interface 
+      DO iPrj=1, nPrj
+         lPP => list%get(ctmpi,"Add RIS projection",iPrj)
+         CALL FINDFACE(ctmpi, iM, iFa)
+         nStk = nStk + msh(iM)%fa(iFa)%nNo
+      END DO
+
+      ALLOCATE(risMap(nMsh,nStk), grisMap(nMsh,nStk))
+      risMap = 0
+      grisMap = 0
+
+      DO iPrj=1, nPrj
+!        iM will be the face id in which we want to project from id face jM        
+         lPP => list%get(ctmpi,"Add RIS projection",iPrj)
+         CALL FINDFACE(ctmpi, iM, iFa)
+
+         lPtr => lPP%get(ctmpj,"Project from face",1)
+         CALL FINDFACE(ctmpj, jM, jFa)
+
+         msh(jM)%tol = 0._RKIND
+         lPtr => lPP%get(msh(jM)%tol,"Projection tolerance")
+         msh(jM)%res = 0._RKIND
+
+         lPtr => lPP%get(msh(jM)%res,"Resistance")
+         RIS%Res = msh(jM)%res
+         CALL MATCHNODES(msh(iM)%fa(iFa), msh(jM)%fa(jFa), msh(jM)%tol, 
+     2       nStk, risMap)
+
+         RIS%lst(1,1,nPrj) = iM 
+         RIS%lst(2,1,nPrj) = jM 
+         RIS%lst(1,2,nPrj) = iFa
+         RIS%lst(2,2,nPrj) = jFa  
+
+         print*, " ** Need to match face ", jFa, " of "//
+     2           " mesh ", jM, " into face ", iFa, " msh ", iM 
+         print*, " ** The nbr of nodes to proj is ", nStk 
+         print*, " ** The res is ", msh(jM)%res 
+      END DO
+
+!     Building the ris map between corresponding node with total enumeration
+      DO i = 1, nMsh
+         print*, " mesh ", i
+         DO j = 1, nStk
+            IF( risMap(i,j) .NE. 0) THEN 
+               grisMap(i,j) = msh(i)%gN(risMap(i,j))
+               print*,"local node ", risMap(i,j)," global ",grisMap(i,j)
+            END IF
+         END DO
+      END DO
+
+      RETURN
+      END SUBROUTINE SETRISPROJECTOR
+!--------------------------------------------------------------------
+!     This is match isoparameteric faces to each other. Project nodes
+!     from two adjacent meshes to each other based on a L2 norm.
+      SUBROUTINE MATCHNODES(lFa, pFa, ptol, nNds, map)
+      USE COMMOD
+      USE ALLFUN
+      IMPLICIT NONE
+      TYPE(faceType), INTENT(INOUT) :: lFa, pFa
+      INTEGER(KIND=IKIND), INTENT(IN) :: nNds
+      INTEGER(KIND=IKIND), INTENT(OUT) :: map(nMsh,nNds)
+      REAL(KIND=RKIND), INTENT(IN) :: ptol
+
+      TYPE blkType
+         INTEGER(KIND=IKIND) :: n = 0
+         INTEGER(KIND=IKIND), ALLOCATABLE :: gN(:)
+      END TYPE
+
+      LOGICAL nFlt(nsd)
+      INTEGER(KIND=IKIND) nBkd, i, a, b, Ac, Bc, iBk, nBk, iM, jM, iSh,
+     2   jSh, cnt
+      REAL(KIND=RKIND) tol, ds, minS, xMin(nsd), xMax(nsd), dx(nsd)
+
+      INTEGER(KIND=IKIND), ALLOCATABLE :: nodeBlk(:)
+      TYPE(blkType), ALLOCATABLE :: blk(:)
+
+      iM  = lFa%iM
+      jM  = pFa%iM
+      iSh = 0
+      jSh = 0
+      DO i=1, iM-1
+         iSh = iSh + msh(i)%gnNo
+      END DO
+      DO i=1, jM-1
+         jSh = jSh + msh(i)%gnNo
+      END DO
+
+      print*, " mesh iM ", iM, " nbr nodes ", msh(iM)%gnNo
+      print*, " mesh iM ", iM, " nodes start at tot nbr ", iSh
+      print*, " mesh jM ", jM, " nbr nodes ", msh(jM)%gnNo
+      print*, " mesh jM ", jM, " nodes start at tot nbr ", jSh
+
+      IF (ISZERO(ptol)) THEN
+         tol = 1.e3_RKIND * eps
+      ELSE
+         tol = ptol
+      END IF
+
+!     We want to have approximately 1000 nodes in each block. So we
+!     calculate nBkd, which is the number of separate blockes in each
+!     direction, based on that.
+      a    = pFa%nNo
+      nBkd = NINT( (REAL(a, KIND=RKIND)/
+     2   1000._RKIND)**(0.333_RKIND),  KIND=IKIND)
+      IF (nBkd .EQ. 0) nBkd = 1
+      nBk  = nBkd**nsd
+      ALLOCATE(nodeBlk(a), blk(nBk))
+
+!     Finding the extends of the domain and size of each block
+      DO i=1, nsd
+         xMin(i) = MIN(MINVAL(x(i,iSh+lFa%gN)), MINVAL(x(i,jSh+pFa%gN)))
+         xMax(i) = MAX(MAXVAL(x(i,iSh+lFa%gN)), MAXVAL(x(i,jSh+pFa%gN)))
+         IF (xMin(i) .LT. 0._RKIND) THEN
+            xMin(i) = xMin(i)*(1._RKIND+eps)
+         ELSE
+            xMin(i) = xMin(i)*(1._RKIND-eps)
+         END IF
+         IF (xMax(i) .LT. 0._RKIND) THEN
+            xMax(i) = xMax(i)*(1._RKIND-eps)
+         ELSE
+            xMax(i) = xMax(i)*(1._RKIND+eps)
+         END IF
+      END DO
+      dx = (xMax - xMin)/REAL(nBkd, KIND=RKIND)
+      nFlt = .TRUE.
+      DO i=1, nsd
+         IF (ISZERO(dx(i))) nFlt(i) = .FALSE.
+      END DO
+
+      print*, " xMax ", xMax
+      print*, " xMin ", xMin
+      print*, " dx ", dx
+
+!     First finding an estimation for size of each block
+      blk%n = 0
+      DO a=1, pFa%nNo
+         Ac  = pFa%gN(a) + jSh
+         iBk = FINDBLK(x(:,Ac))
+         nodeBlk(a) = iBk
+         blk(iBk)%n = blk(iBk)%n + 1
+      END DO
+      DO iBk=1, nBk
+         ALLOCATE(blk(iBk)%gN(blk(iBk)%n))
+      END DO
+      blk%n = 0
+      DO a=1, pFa%nNo
+         Ac  = pFa%gN(a)
+         iBk = nodeBlk(a)
+         blk(iBk)%n = blk(iBk)%n + 1
+         blk(iBk)%gN(blk(iBk)%n) = Ac
+      END DO
+
+!     Doing the calculation for every single node on this face
+      cnt  = 0
+      DO a=1, lFa%nNo
+         Ac  = lFa%gN(a)
+         iBk = FINDBLK(x(:,Ac+iSh))
+!     Checking every single node on the other face
+         minS = HUGE(minS)
+         DO b=1, blk(iBk)%n
+            Bc = blk(iBk)%gN(b)
+            IF (iM.EQ.jM .AND. Ac.EQ.Bc) CYCLE
+            ds = SQRT(SUM( (x(:,Bc+jSh) - x(:,Ac+iSh))**2._RKIND ))
+            IF (ds .LT. minS) THEN
+               minS = ds
+               i = Bc
+            END IF
+         END DO
+         Bc = i
+         IF (tol < 0._RKIND) THEN
+            print*, " adding connection (/Ac,Bc/)) = (",Ac,",",Bc,")"
+            cnt = cnt + 1
+            map(iM,cnt) = Ac
+            map(jM,cnt) = Bc
+         ELSE IF (minS .LT. tol) THEN
+            print*, " adding connection (/Ac,Bc/)) = (",Ac,",",Bc,")"
+            cnt = cnt + 1
+            map(iM,cnt) = Ac
+            map(jM,cnt) = Bc
+         END IF
+      END DO
+
+      IF (cnt .NE. lFa%nNo) err = " Failed to project faces between <"//
+     2   TRIM(lFa%name)//"> and <"//TRIM(pFa%name)//">"
+
+      print*, " Finally the map is: "
+      print*, map(1,:) 
+      print*, map(2,:) 
+
+      RETURN
+      CONTAINS
+!--------------------------------------------------------------------
+      INTEGER(KIND=IKIND) FUNCTION FINDBLK(x)
+      IMPLICIT NONE
+      REAL(KIND=RKIND), INTENT(IN) :: x(nsd)
+
+      INTEGER(KIND=IKIND) i, j, k
+
+      i = 1
+      j = 1
+      k = 1
+      IF (nFlt(1)) i = INT((x(1) - xMin(1))/dx(1), KIND=IKIND)
+      IF (nFlt(2)) j = INT((x(2) - xMin(2))/dx(2), KIND=IKIND)
+      IF (i .EQ. nBkd) i = nBkd - 1
+      IF (j .EQ. nBkd) j = nBkd - 1
+      IF (nsd .EQ. 3) THEN
+         IF (nFlt(3)) k = INT((x(3) - xMin(3))/dx(3), KIND=IKIND)
+         IF (k .EQ. nBkd) k = nBkd - 1
+         FINDBLK = k + (j + i*nBkd)*nBkd + 1
+      ELSE ! nsd .EQ. 2
+         FINDBLK = j + i*nBkd + 1
+      END IF
+
+      RETURN
+      END FUNCTION FINDBLK
+!--------------------------------------------------------------------
+      END SUBROUTINE MATCHNODES
 !####################################################################
 !     This routines associates two faces with each other and sets gN
       SUBROUTINE SETPROJECTOR(list, avNds)
@@ -817,6 +1150,79 @@ c               END IF
       RETURN
       END SUBROUTINE SETDMNIDFF
 !####################################################################
+!     Read multiple fiber directions from a single vtu file
+      SUBROUTINE READFIBNFSF(lM, fName)
+      USE COMMOD
+      USE LISTMOD
+      USE ALLFUN
+      USE vtkXMLMod
+      IMPLICIT NONE
+      TYPE(mshType), INTENT(INOUT) :: lM
+      CHARACTER(LEN=*) :: fName
+
+      TYPE(vtkXMLType) :: vtu
+      INTEGER(KIND=IKIND) :: i, e, is, ie, nvar, istat
+      CHARACTER(LEN=stdL) :: stmp
+
+      REAL(KIND=RKIND), ALLOCATABLE :: tmpR(:,:)
+      CHARACTER(LEN=stdL), ALLOCATABLE :: varNames(:)
+
+      istat = 0;
+      std = " <VTK XML Parser> Loading file <"//TRIM(fName)//">"
+      CALL loadVTK(vtu, fName, istat)
+      IF (istat .LT. 0) err = " VTU file read error (init)"
+
+      CALL getVTK_numElems(vtu, e, istat)
+      IF (e .NE. lM%gnEl) THEN
+         err = " Mismatch in num elems while loading fibers"
+      END IF
+
+      CALL getVTK_numElemData(vtu, nvar, istat)
+      IF (istat .LT. 0) err = " VTU file read error (numElemData)"
+
+      IF (lM%nFn .EQ. 0) THEN
+         ALLOCATE(varNames(nvar))
+         CALL getVTK_elemDataNames(vtu, varNames, istat)
+         IF (istat .LT. 0) err = " VTU file read error (elemDataNames)"
+
+         DO i=1, nvar
+            stmp = varNames(i)
+            IF (stmp(1:7) .EQ. 'FIB_DIR') THEN
+               READ(stmp(8:8),*,IOSTAT=istat) e
+               IF (istat .NE. 0) err = " Cannot find fiber directions"
+               IF (e .GT. lM%nFn) lM%nFn = e
+            END IF
+         END DO
+         DEALLOCATE(varNames)
+
+!        Return if no fiber directions are found
+         IF (lM%nFn .EQ. 0) THEN
+            RETURN
+         END IF
+      END IF
+
+      ALLOCATE(lM%fN(nsd*lM%nFn,lM%gnEl))
+      lM%fN = 0._RKIND
+
+      ALLOCATE(tmpR(maxNSD,lM%gnEl))
+      DO i=1, lM%nFn
+         WRITE(stmp,'(A)') "FIB_DIR"//STR(i)
+         CALL getVTK_elemData(vtu, TRIM(stmp), tmpR, istat)
+         IF (istat .LT. 0) err = " VTU file read error "//TRIM(stmp)
+
+         is = (i-1)*nsd + 1
+         ie = i*nsd
+         DO e=1, lM%gnEl
+            lM%fN(is:ie,e) = tmpR(1:nsd,e)
+         END DO
+      END DO
+
+      DEALLOCATE(tmpR)
+      CALL flushVTK(vtu)
+
+      RETURN
+      END SUBROUTINE READFIBNFSF
+!####################################################################
 !     Read fiber direction from a vtu file
       SUBROUTINE READFIBNFF(lM, fName, kwrd, idx)
       USE COMMOD
@@ -828,7 +1234,7 @@ c               END IF
       CHARACTER(LEN=*) :: fName, kwrd
       INTEGER(KIND=IKIND), INTENT(IN) :: idx
 
-      INTEGER(KIND=IKIND) :: iStat, e
+      INTEGER(KIND=IKIND) :: iStat, is, ie, e
       TYPE(vtkXMLType) :: vtu
 
       REAL(KIND=RKIND), ALLOCATABLE :: tmpR(:,:)
@@ -836,21 +1242,24 @@ c               END IF
       iStat = 0;
       std = " <VTK XML Parser> Loading file <"//TRIM(fName)//">"
       CALL loadVTK(vtu, fName, iStat)
-      IF (iStat .LT. 0) err = "VTU file read error (init)"
+      IF (iStat .LT. 0) err = " VTU file read error (init)"
 
       CALL getVTK_numElems(vtu, e, iStat)
-      IF (e .NE. lM%gnEl) err = "Mismatch in num elems for "//
+      IF (e .NE. lM%gnEl) err = " Mismatch in num elems for "//
      2   TRIM(kwrd)
 
       ALLOCATE(tmpR(maxNSD,lM%gnEl))
       tmpR = 0._RKIND
       CALL getVTK_elemData(vtu, TRIM(kwrd), tmpR, iStat)
-      IF (iStat .LT. 0) err = "VTU file read error "//TRIM(kwrd)
-      DO e=1, lM%gnEl
-         lM%fN((idx-1)*nsd+1:idx*nsd,e) = tmpR(1:nsd,e)
-      END DO
-      DEALLOCATE(tmpR)
+      IF (iStat .LT. 0) err = " VTU file read error "//TRIM(kwrd)
 
+      is = (idx-1)*nsd + 1
+      ie = idx*nsd
+      DO e=1, lM%gnEl
+         lM%fN(is:ie,e) = tmpR(1:nsd,e)
+      END DO
+
+      DEALLOCATE(tmpR)
       CALL flushVTK(vtu)
 
       RETURN
