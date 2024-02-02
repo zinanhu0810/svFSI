@@ -194,6 +194,7 @@
       public :: getVTK_numElemData
       public :: getVTK_elemDataNames
       public :: getVTK_elemData
+
       public :: putVTK_pointData
       public :: putVTK_elemData
 
@@ -442,6 +443,7 @@
             vtk%pcAtt(iatt)%pName  = ""
             vtk%pcAtt(iatt)%ptClField(:) = ""
             vtk%pcAtt(iatt)%ptClFieldName(:) = ""
+            vtk%pcAtt(iatt)%n = 0
          end do
 
          do fid=11, 1024
@@ -1914,7 +1916,7 @@
          integer(IK) :: npos
          character :: c
 
-         write(stdout,'(A)') trim(STR(spos))//" "//trim(STR(epos))
+!         write(stdout,'(A)') trim(STR(spos))//" "//trim(STR(epos))
          npos = spos
          do
             read(fid,pos=npos) c
@@ -1929,8 +1931,8 @@
 
          do
             read(fid,pos=npos) c
-            write(stdout,'(A)') trim(STR(npos))//" '"// &
-            c//"' "//trim(STR(ichar(c)))
+!            write(stdout,'(A)') trim(STR(npos))//" '"// &
+!            c//"' "//trim(STR(ichar(c)))
             if ( c.eq.' ' .or. c.eq.eol .or. c.eq.'   ' ) exit
             npos = npos+1
          end do
@@ -2281,6 +2283,11 @@
 
          nPtData = vtk%pcAtt(1)%n
 
+         if (nPtData .eq. 0) then
+            write(stdout,ftab4) " ERROR: no point data found"
+            istat = -1; return
+         end if
+
          return
          end subroutine getVTK_numPointData
 
@@ -2347,8 +2354,7 @@
          end do
 
          if ( .not.flag ) then
-            write(stdout,ftab4) &
-               "ERROR: could not find <"//trim(kwrd)// &
+            write(stdout,ftab4) " Could not find <"//trim(kwrd)// &
                "> in PointData attribute"
             istat=-1; return
          end if
@@ -2407,8 +2413,7 @@
          end do
 
          if ( .not.flag ) then
-            write(stdout,ftab4) &
-               "ERROR: could not find <"//trim(kwrd)// &
+            write(stdout,ftab4) " Could not find <"//trim(kwrd)// &
                "> in PointData attribute"
             istat=-1; return
          end if
@@ -2454,8 +2459,7 @@
          end do
 
          if ( .not.flag ) then
-            write(stdout,ftab4) &
-               "ERROR: could not find <"//trim(kwrd)// &
+            write(stdout,ftab4) " Could not find <"//trim(kwrd)// &
                "> in PointData attribute"
             istat=-1; return
          end if
@@ -2514,8 +2518,7 @@
          end do
 
          if ( .not.flag ) then
-            write(stdout,ftab4) &
-               "ERROR: could not find <"//trim(kwrd)// &
+            write(stdout,ftab4) " Could not find <"//trim(kwrd)// &
                "> in PointData attribute"
             istat=-1; return
          end if
@@ -2531,6 +2534,11 @@
          integer(IK), intent(inout) :: istat
 
          nElData = vtk%pcAtt(2)%n
+
+         if (nElData .eq. 0) then
+            write(stdout,ftab4) " ERROR: no element data found"
+            istat = -1; return
+         end if
 
          return
          end subroutine getVTK_numElemData
@@ -2597,8 +2605,7 @@
          end do
 
          if ( .not.flag ) then
-            write(stdout,ftab4) &
-               "ERROR: could not find <"//trim(kwrd)// &
+            write(stdout,ftab4) " Could not find <"//trim(kwrd)// &
                "> in CellData attribute"
             istat=-1; return
          end if
@@ -2657,8 +2664,7 @@
          end do
 
          if ( .not.flag ) then
-            write(stdout,ftab4) &
-               "ERROR: could not find <"//trim(kwrd)// &
+            write(stdout,ftab4) " Could not find <"//trim(kwrd)// &
                "> in CellData attribute"
             istat=-1; return
          end if
@@ -2705,8 +2711,7 @@
          end do
 
          if ( .not.flag ) then
-            write(stdout,ftab4) &
-               "ERROR: could not find <"//trim(kwrd)// &
+            write(stdout,ftab4) " Could not find <"//trim(kwrd)// &
                "> in CellData attribute"
             istat=-1; return
          end if
@@ -2765,8 +2770,7 @@
          end do
 
          if ( .not.flag ) then
-            write(stdout,ftab4) &
-               "ERROR: could not find <"//trim(kwrd)// &
+            write(stdout,ftab4) " Could not find <"//trim(kwrd)// &
                "> in CellData attribute"
             istat=-1; return
          end if

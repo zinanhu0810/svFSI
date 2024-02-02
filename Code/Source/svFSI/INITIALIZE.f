@@ -42,7 +42,8 @@
       REAL(KIND=RKIND), INTENT(OUT) :: timeP(3)
 
       LOGICAL :: flag
-      INTEGER(KIND=IKIND) :: i, a, iEq, iDmn, iM, iFa, ierr, nnz, gnnz
+      INTEGER(KIND=IKIND) :: i, j, a, iEq, iDmn, iM, iFa, ierr, nnz, 
+     2             gnnz
       CHARACTER(LEN=stdL) :: fTmp, sTmp
       REAL(KIND=RKIND) :: am
       TYPE(FSILS_commuType) :: communicator
@@ -68,6 +69,8 @@
 !     For initializing CMM, LS pointer to fixed edge nodes
       IF (cmmInit) nFacesLS = nFacesLS + 1
 
+!     Setting cplBC%coupled based on the first equation (typically
+!     fluid / FSI / CMM)
       IF (ANY(eq(1)%bc%cplBCptr .NE. 0)) cplBC%coupled = .TRUE.
 
       flag = .FALSE.
@@ -151,12 +154,12 @@
 
 !     Calculating the record length
       i = 2*tDof
-      IF (dFlag) i = 3*tDof
-      IF (pstEq) i = i + nsymd
-      IF (sstEq) i = i + nsd
+      IF (dFlag)  i = 3*tDof
+      IF (pstEq)  i = i + nsymd
+      IF (sstEq)  i = i + nsd
       IF (cepEq) THEN
          i = i + nXion
-         IF (cem%cpld) i = i + 1
+         IF (ecCpld) i = i + 1
       END IF
       i = IKIND*(1+SIZE(stamp)) + RKIND*(2+nEq+cplBC%nX+i*tnNo)
 
@@ -171,16 +174,33 @@
       IF (shlEq) THEN
          DO iM=1, nMsh
             IF (msh(iM)%lShl) THEN
-               IF (msh(iM)%eType .EQ. eType_NRB) THEN
+               IF (msh(iM)%eType .EQ. eType_TRI3) THEN
+                  CALL SETSHLXIEN(msh(iM))
+               ELSE
                   ALLOCATE(msh(iM)%eIEN(0,0))
                   ALLOCATE(msh(iM)%sbc(msh(iM)%eNoN,msh(iM)%nEl))
                   msh(iM)%sbc = 0
-               ELSE IF (msh(iM)%eType .EQ. eType_TRI3) THEN
-                  CALL SETSHLXIEN(msh(iM))
                END IF
             END IF
          END DO
       END IF
+
+      IF(risFlag) THEN 
+!        Building the global risMap with total nodes enumeration
+         DO i = 1, nMsh
+            print*, " mesh ", i
+            DO j = 1, SIZE(risMap,2)
+               IF( risMap(i,j) .NE. 0) THEN 
+                  grisMap(i,j) = msh(i)%gN(risMap(i,j))
+               END IF
+            END DO
+         END DO  
+
+         print*, " Finally the gmap is: "
+         print*, grisMap(1,:) 
+         print*, grisMap(2,:) 
+
+      END IF  
 
 !     Initialize tensor operations
       CALL TEN_INIT(nsd)
@@ -239,18 +259,31 @@
          pSa = 0._RKIND
       END IF
 
-!     Electrophysiology
+!     Initialize electrophysiology data structures
       IF (cepEq) THEN
          ALLOCATE(Xion(nXion,tnNo))
          Xion(:,:) = 0._RKIND
 
          CALL CEPINIT()
 
-!        Electro-Mechanics
-         IF (cem%cpld) THEN
-            ALLOCATE(cem%Ya(tnNo))
-            cem%Ya = 0._RKIND
+!        Initialize data structure if excitation-contraction coupling is
+!        applied with electrophysiology model
+         IF (ecCpld) THEN
+            ALLOCATE(ec_Ya(tnNo))
+            ec_Ya = 0._RKIND
          END IF
+      END IF
+
+!     Initialize structures for imposed and non-cellular activation type
+!     excitation-contraction coupling
+      IF (ecCpld) THEN
+         DO iEq=1, nEq
+            DO iDmn=1, eq(iEq)%nDmn
+               IF (.NOT.eq(iEq)%dmn(iDmn)%ec%caCpld) THEN
+                  CALL EC_DCPLD_INIT(eq(iEq)%dmn(iDmn)%ec)
+               END IF
+            END DO
+         END DO
       END IF
 
       IF (.NOT.resetSim) THEN
@@ -362,6 +395,17 @@
      2            "domain "//iDmn//" of equation "//iEq//" is zero >>"
             END IF
          END DO
+      END DO
+
+!     Calculating the volume of each mesh
+      s = 1._RKIND
+      DO iM=1, nMsh
+         print*, " Compute volume for iMsh ", iM
+         msh(iM)%v = Integ(iM, s)
+         std = "    Volume of mesh <"//STR(iM)//"> is "//
+     2            STR(msh(iM)%v)
+            IF (ISZERO(msh(iM)%v)) wrn = "<< Volume of "//
+     2            "mesh "//iM//" is zero >>"
       END DO
 
 !     Preparing faces and BCs
@@ -513,10 +557,13 @@
                   READ(fid,REC=cm%tF()) tStamp, cTS, time, timeP(1),
      2               eq%iNorm, cplBC%xo, Yo, Ao, Do, pS0, Ad
                ELSE IF (cepEq) THEN
-                  IF (.NOT.cem%cpld) err = "Incorrect equation "//
-     2               "combination. Cannot load restart files"
-                  READ(fid,REC=cm%tF()) tStamp, cTS, time, timeP(1),
-     2               eq%iNorm, cplBC%xo, Yo, Ao, Do, Ad, Xion, cem%Ya
+                  IF (ecCpld) THEN
+                     READ(fid,REC=cm%tF()) tStamp, cTS, time, timeP(1),
+     2                  eq%iNorm, cplBC%xo, Yo, Ao, Do, Ad, Xion, ec_Ya
+                  ELSE
+                     READ(fid,REC=cm%tF()) tStamp, cTS, time, timeP(1),
+     2                  eq%iNorm, cplBC%xo, Yo, Ao, Do, Ad, Xion
+                  END IF
                ELSE
                   READ(fid,REC=cm%tF()) tStamp, cTS, time, timeP(1),
      2               eq%iNorm, cplBC%xo, Yo, Ao, Do, Ad
@@ -526,10 +573,13 @@
                   READ(fid,REC=cm%tF()) tStamp, cTS, time, timeP(1),
      2               eq%iNorm, cplBC%xo, Yo, Ao, Do, pS0
                ELSE IF (cepEq) THEN
-                  IF (.NOT.cem%cpld) err = "Incorrect equation "//
-     2               "combination. Cannot load restart files"
-                  READ(fid,REC=cm%tF()) tStamp, cTS, time, timeP(1),
-     2               eq%iNorm, cplBC%xo, Yo, Ao, Do, Xion, cem%Ya
+                  IF (ecCpld) THEN
+                     READ(fid,REC=cm%tF()) tStamp, cTS, time, timeP(1),
+     2                  eq%iNorm, cplBC%xo, Yo, Ao, Do, Xion, ec_Ya
+                  ELSE
+                     READ(fid,REC=cm%tF()) tStamp, cTS, time, timeP(1),
+     2                  eq%iNorm, cplBC%xo, Yo, Ao, Do, Xion
+                  END IF
                ELSE
                   READ(fid,REC=cm%tF()) tStamp, cTS, time, timeP(1),
      2               eq%iNorm, cplBC%xo, Yo, Ao, Do
@@ -645,6 +695,9 @@
       IF (ALLOCATED(cmmBdry))  DEALLOCATE(cmmBdry)
       IF (ALLOCATED(iblank))   DEALLOCATE(iblank)
 
+      IF (ALLOCATED(risMap))   DEALLOCATE(risMap)
+      IF (ALLOCATED(grisMap))  DEALLOCATE(grisMap)
+
       IF (ALLOCATED(Ao))       DEALLOCATE(Ao)
       IF (ALLOCATED(An))       DEALLOCATE(An)
       IF (ALLOCATED(Do))       DEALLOCATE(Do)
@@ -674,11 +727,12 @@
 
       IF (ALLOCATED(varWallProps)) DEALLOCATE(varWallProps)
 
-!     Electrophysiology and Electromechanics
+!     Electrophysiology
       IF (cepEq) THEN
          IF (ALLOCATED(Xion))  DEALLOCATE(Xion)
-         IF (cem%cpld) THEN
-            IF (ALLOCATED(cem%Ya))  DEALLOCATE(cem%Ya)
+!        Excitation-contraction coupling
+         IF (ecCpld) THEN
+            IF (ALLOCATED(ec_Ya))  DEALLOCATE(ec_Ya)
          END IF
       END IF
 
@@ -710,6 +764,12 @@
          DEALLOCATE(ib%msh)
 
          DEALLOCATE(ib)
+      END IF
+
+!     RIS model 
+      IF (risFlag) THEN
+         IF(ALLOCATED(RIS%lst))    DEALLOCATE(RIS%lst)
+         DEALLOCATE(RIS)
       END IF
 
 !     Closing the output channels
