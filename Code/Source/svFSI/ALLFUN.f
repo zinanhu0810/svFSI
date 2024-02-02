@@ -43,7 +43,7 @@
       IMPLICIT NONE
 
       INTERFACE Integ
-         MODULE PROCEDURE IntegS, IntegV, IntegG, vInteg
+         MODULE PROCEDURE IntegS, IntegV, IntegG, vInteg, vIntegM
       END INTERFACE Integ
 
       INTERFACE COMMU
@@ -392,7 +392,7 @@
      2         sl(eNoN), tmps(nsd,insd))
 
             DO e=1, msh(iM)%nEl
-               IF (dId.GT.0 .AND. ALLOCATED(msh(iM)%eId)) THEN
+               IF (dId.GE.0 .AND. ALLOCATED(msh(iM)%eId)) THEN
                   IF (.NOT.BTEST(msh(iM)%eId(e),dId)) CYCLE
                END IF
 !           Updating the shape functions, if this is a NURB
@@ -492,6 +492,114 @@
 
       RETURN
       END FUNCTION vInteg
+!####################################################################
+!--------------------------------------------------------------------
+!     This routine integrate an equation over a particular domain
+      FUNCTION vIntegM(iM, s)
+      USE COMMOD
+      IMPLICIT NONE
+      INTEGER(KIND=IKIND), INTENT(IN) :: iM
+      REAL(KIND=RKIND), INTENT(IN) :: s(:,:)
+      REAL(KIND=RKIND) vIntegM
+
+      INTEGER(KIND=IKIND) a, e, g, Ac, eNoN, insd, ibl, nNo
+      REAL(KIND=RKIND) Jac, nV(nsd), sHat, tmp(nsd,nsd)
+      TYPE(fsType) :: fs
+
+      REAL(KIND=RKIND), ALLOCATABLE :: xl(:,:), sl(:), Nxi(:,:),
+     2   Nx(:,:), tmps(:,:)
+
+      nNo = SIZE(s,2)
+      IF (nNo .NE. tnNo) THEN
+         err = "Incompatible vector size in vIntegM"
+      END IF
+
+      vIntegM = 0._RKIND
+
+      insd = nsd
+      IF (msh(iM)%lShl) insd = nsd-1
+      IF (msh(iM)%lFib) insd = 1
+
+!     Update pressure function space for Taylor-Hood type element
+      IF ( msh(iM)%nFs.EQ.2 ) THEN
+         fs%nG    = msh(iM)%fs(2)%nG
+         fs%eType = msh(iM)%fs(2)%eType
+         fs%lShpF = msh(iM)%fs(2)%lShpF
+         fs%eNoN  = msh(iM)%fs(2)%eNoN
+         ALLOCATE(fs%w(fs%nG), fs%N(fs%eNoN,fs%nG),
+     2            fs%Nx(nsd,fs%eNoN,fs%nG))
+         IF (fs%eType .NE. eType_NRB) THEN
+            fs%w  = msh(iM)%fs(2)%w
+            fs%N  = msh(iM)%fs(2)%N
+            fs%Nx = msh(iM)%fs(2)%Nx
+         END IF
+      ELSE
+         fs%nG    = msh(iM)%fs(1)%nG
+         fs%eType = msh(iM)%fs(1)%eType
+         fs%lShpF = msh(iM)%fs(1)%lShpF
+         fs%eNoN  = msh(iM)%fs(1)%eNoN
+         ALLOCATE(fs%w(fs%nG), fs%N(fs%eNoN,fs%nG),
+     2            fs%Nx(nsd,fs%eNoN,fs%nG))
+         IF (fs%eType .NE. eType_NRB) THEN
+            fs%w  = msh(iM)%fs(1)%w
+            fs%N  = msh(iM)%fs(1)%N
+            fs%Nx = msh(iM)%fs(1)%Nx
+         END IF
+      END IF
+      eNoN = fs%eNoN
+
+      ALLOCATE(xl(nsd,eNoN), Nxi(insd,eNoN), Nx(insd,eNoN),
+     2         sl(eNoN), tmps(nsd,insd))
+
+      DO e=1, msh(iM)%nEl
+!        Updating the shape functions, if this is a NURB
+         IF (msh(iM)%eType .EQ. eType_NRB) THEN
+            CALL NRBNNX(msh(iM), e)
+            fs%w  = msh(iM)%w
+            fs%N  = msh(iM)%N
+            fs%Nx = msh(iM)%Nx
+         END IF
+
+         ibl = 0
+         DO a=1, eNoN
+            Ac      = msh(iM)%IEN(a,e)
+            xl(:,a) = x(:,Ac)
+            IF (mvMsh) xl(:,a) = xl(:,a) + Do(nsd+2:2*nsd+1,Ac)
+            sl(a) = s(1,Ac)
+            ibl = ibl + iblank(Ac)
+         END DO
+         IF (ibl .EQ. eNoN) CYCLE
+
+         DO g=1, fs%nG
+            Nxi(:,:) = fs%Nx(:,:,g)
+            IF (g.EQ.1 .OR. .NOT.fs%lShpF) THEN
+               IF (msh(iM)%lShl) THEN
+                  CALL GNNS(eNoN, Nxi, xl, nV, tmps, tmps)
+                  Jac = SQRT(NORM(nV))
+               ELSE
+                  CALL GNN(eNoN, insd, Nxi, xl, Nx, Jac, tmp)
+               END IF
+            END IF
+            IF (ISZERO(Jac)) err = "Jac < 0 @ element "//e
+
+            sHat = 0._RKIND
+            DO a=1, eNoN
+               Ac = msh(iM)%IEN(a,e)
+               sHat = sHat + sl(a)*fs%N(a,g)
+            END DO
+            vIntegM = vIntegM + fs%w(g)*Jac*sHat
+         END DO
+      END DO
+
+      DEALLOCATE(xl, Nxi, Nx, sl, tmps)
+      CALL DESTROY(fs)
+
+
+      IF (cm%seq()) RETURN
+      vIntegM = cm%reduce(vIntegM)
+
+      RETURN
+      END FUNCTION vIntegM
 !####################################################################
 !     This a both way communication with three main part:
       SUBROUTINE COMMUS(U)
@@ -1175,6 +1283,7 @@
       IF (ALLOCATED(lM%Nb))      DEALLOCATE(lM%Nb)
       IF (ALLOCATED(lM%nV))      DEALLOCATE(lM%nV)
       IF (ALLOCATED(lM%fN))      DEALLOCATE(lM%fN)
+      IF (ALLOCATED(lM%tmX))     DEALLOCATE(lM%tmX)
       IF (ALLOCATED(lM%Nx))      DEALLOCATE(lM%Nx)
       IF (ALLOCATED(lM%Nxx))     DEALLOCATE(lM%Nxx)
 
@@ -1297,6 +1406,10 @@
       lDmn%stM%afs     = 0._RKIND
       lDmn%stM%bfs     = 0._RKIND
       lDmn%stM%khs     = 100._RKIND
+      lDmn%stM%a0      = 0._RKIND
+      lDmn%stM%b1      = 0._RKIND
+      lDmn%stM%b2      = 0._RKIND
+      lDmn%stM%mu0     = 0._RKIND
 
       lDmn%stM%Tf%g     = 0._RKIND
       lDmn%stM%Tf%fType = 0
@@ -1304,6 +1417,7 @@
       IF (ALLOCATED(lDmn%stM%Tf%gt%qs)) DEALLOCATE(lDmn%stM%Tf%gt%qs)
       IF (ALLOCATED(lDmn%stM%Tf%gt%r))  DEALLOCATE(lDmn%stM%Tf%gt%r)
       IF (ALLOCATED(lDmn%stM%Tf%gt%i))  DEALLOCATE(lDmn%stM%Tf%gt%i)
+      lDmn%stM%Tf%eta_s = 0._RKIND
 
       ! lDmn%cep
       lDmn%cep%cepType  = cepModel_NA

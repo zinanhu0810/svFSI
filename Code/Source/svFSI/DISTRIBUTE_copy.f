@@ -51,6 +51,9 @@
      2   tmpD(:,:,:)
       TYPE(mshType), ALLOCATABLE :: tMs(:)
 
+      PRINT*,"-----inside distribution 1-----"
+      
+
 !     Preparing IO incase of error or warning. I'm keeping dbg channel
 !     closed is slave processors. Warning is closed only if it is
 !     closed in master
@@ -85,25 +88,25 @@
          DO iEq=1, nEq
             DO iDmn=1, eq(iEq)%nDmn
                IF (ALLOCATED(eq(iEq)%dmn(iDmn)%stM%Tf%gx)) THEN
-!                  PRINT*,"here"
+                  PRINT*,"here"
                   ALLOCATE(tmpF(gtnNo))
                   tmpF = eq(iEq)%dmn(iDmn)%stM%Tf%gx
                   DEALLOCATE(eq(iEq)%dmn(iDmn)%stM%Tf%gx)
                   ALLOCATE(eq(iEq)%dmn(iDmn)%stM%Tf%gx(gtnNo))                  
                   
                   iM = 2
-!                  PRINT*, "Number of node is ",msh(1)%nNo
-!                  PRINT*, "Number of node is ",msh(2)%nNo
-!                  PRINT*,gtnNo
+                  PRINT*, "Number of node is ",msh(1)%nNo
+                  PRINT*, "Number of node is ",msh(2)%nNo
+                  PRINT*,gtnNo
                   DO a=1, 2520
                      Ac = msh(iM)%gpN(a)
-!                     IF (a .EQ. 1) THEN
-!                        PRINT*, Ac
-!                     END IF
+                     IF (a .EQ. 1) THEN
+                        PRINT*, Ac
+                     END IF
                      eq(iEq)%dmn(iDmn)%stM%Tf%gx(Ac) = tmpF(a)
-!                     IF (a .EQ. 1) THEN
-!                        PRINT*, eq(iEq)%dmn(iDmn)%stM%Tf%gx(Ac)
-!                     END IF
+                     IF (a .EQ. 1) THEN
+                        PRINT*, eq(iEq)%dmn(iDmn)%stM%Tf%gx(Ac)
+                     END IF
                   END DO
                   DEALLOCATE(tmpF)
                END IF
@@ -111,6 +114,7 @@
          END DO
       END IF
 
+      PRINT*,"-----inside distribution 2-----"
 !     First partitioning the meshes
 !     gmtl:  gtnNo --> tnNo
       tnNo = 0
@@ -144,6 +148,9 @@
             END DO
          END DO
       END DO
+
+      PRINT*,"-----inside distribution 3-----"
+
       IF (cm%seq()) THEN
 !        Rearrange body force structure, if necessary
          DO iEq=1, nEq
@@ -182,6 +189,10 @@
          RETURN
       END IF
 
+
+
+
+      
 !     Partitioning the faces
       DO iM=1, nMsh
          ALLOCATE(tMs(iM)%fa(msh(iM)%nFa))
@@ -190,6 +201,7 @@
      2         gmtl)
          END DO
       END DO
+
 
 !     Sending data from read by master in READFILES to slaves
       IF (.NOT.resetSim) THEN
@@ -218,10 +230,7 @@
          CALL cm%bcast(pstEq)
          CALL cm%bcast(sstEq)
          CALL cm%bcast(cepEq)
-         CALL cm%bcast(risFlag)
-         CALL cm%bcast(ris0DFlag)
-!         CALL cm%bcast(urisFlag)
-!         CALL cm%bcast(urisActFlag)
+         CALL cm%bcast(ecCpld)
          IF (rmsh%isReqd) THEN
             CALL cm%bcast(rmsh%method)
             CALL cm%bcast(rmsh%freq)
@@ -554,6 +563,7 @@
       CALL cm%bcast(lEq%nBc)
       CALL cm%bcast(lEq%nBf)
       CALL cm%bcast(lEq%tol)
+      CALL cm%bcast(lEq%absTol)
       CALL cm%bcast(lEq%useTLS)
       CALL cm%bcast(lEq%assmTLS)
       IF (ibFlag) THEN
@@ -592,6 +602,7 @@
          CALL cm%bcast(lEq%dmn(iDmn)%prop)
          IF (lEq%dmn(iDmn)%phys .EQ. phys_CEP) THEN
             CALL cm%bcast(lEq%dmn(iDmn)%cep%cepType)
+            CALL cm%bcast(lEq%dmn(iDmn)%cep%fpar_in)
             CALL cm%bcast(lEq%dmn(iDmn)%cep%nX)
             CALL cm%bcast(lEq%dmn(iDmn)%cep%nG)
             CALL cm%bcast(lEq%dmn(iDmn)%cep%nFn)
@@ -616,8 +627,13 @@
          END IF
 
          IF ((lEq%dmn(iDmn)%phys .EQ. phys_struct)  .OR.
-     2       (lEq%dmn(iDmn)%phys .EQ. phys_ustruct)) THEN
+     2       (lEq%dmn(iDmn)%phys .EQ. phys_ustruct) .OR.
+     3       (lEq%dmn(iDmn)%phys .EQ. phys_shell)) THEN
             CALL DIST_MATCONSTS(lEq%dmn(iDmn)%stM)
+         END IF
+
+         IF (ecCpld) THEN
+            CALL DIST_ECMODEL(lEq%dmn(iDmn)%ec)
          END IF
 
          IF ((lEq%dmn(iDmn)%phys .EQ. phys_fluid)  .OR.
@@ -626,13 +642,6 @@
             CALL DIST_VISCMODEL(lEq%dmn(iDmn)%visc)
          END IF
       END DO
-
-!     Distribute cardiac electromechanics parameters
-!      CALL cm%bcast(cem%cpld)
-!      IF (cem%cpld) THEN
-!         CALL cm%bcast(cem%aStress)
-!         CALL cm%bcast(cem%aStrain)
-!      END IF
 
       IF (ibFlag) THEN
          IF (cm%slv()) ALLOCATE(lEq%dmnIB(lEq%nDmnIB))
@@ -693,7 +702,6 @@
 
       CALL cm%bcast(lBc%cplBCptr)
       CALL cm%bcast(lBc%bType)
-      CALL cm%bcast(lBc%clsFlgRis)
       IF (cm%slv()) ALLOCATE(lBc%eDrn(nsd), lBc%h(nsd))
       CALL cm%bcast(lBc%eDrn)
       CALL cm%bcast(lBc%iFa)
@@ -707,6 +715,7 @@
       CALL cm%bcast(lBc%tauB)
       CALL cm%bcast(lBc%flwP)
       CALL cm%bcast(lBc%rbnN)
+      CALL cm%bcast(lBc%clsFlgRis)
       IF (BTEST(lBc%bType,bType_RCR)) THEN
          CALL cm%bcast(lBc%RCR%Rp)
          CALL cm%bcast(lBc%RCR%C)
@@ -808,55 +817,6 @@
          DEALLOCATE(tmp)
       END IF
 
-!     Communicating and reordering master node data for undeforming
-!     Neumann BC faces
-!      IF (BTEST(lBc%bType,bType_undefNeu)) THEN
-!         CALL cm%bcast(lBc%masN)
-!         iM   = lBc%iM
-!         iFa  = lBc%iFa
-!         nNo  = msh(iM)%fa(iFa)%nNo
-!         flag = nNo .NE. 0
-!        Action performed only on the processes that share the face
-!         IF (flag) THEN
-!            Ac = lBc%masN
-!            a  = gmtl(Ac)
-!        The process that owns the node is set to be master. For other
-!        processes that share the face but do not own the node, we add
-!        this node as a ghost master node. ltg pointer is reset.
-!            IF (a .NE. 0) THEN
-!               lBc%masN = a
-!            ELSE
-!               nNo  = tnNo
-!               tnNo = tnNo + 1
-!!              Remap ltg
-!               IF (ALLOCATED(tmpI)) DEALLOCATE(tmpI)
-!               ALLOCATE(tmpI(nNo))
-!               tmpI = ltg
-!               DEALLOCATE(ltg)
-!               ALLOCATE(ltg(tnNo))
-!               ltg(1:nNo) = tmpI(:)
-!               DEALLOCATE(tmpI)
-!               ltg(tnNo) = Ac
-!               lBc%masN  = tnNo
-
-!              Add the ghost master node to the face data structure
-!               nNo = msh(iM)%fa(iFa)%nNo
-!               msh(iM)%fa(iFa)%nNo = nNo + 1
-!               ALLOCATE(tmpI(nNo))
-!               tmpI(:) = msh(iM)%fa(iFa)%gN(:)
-!               DEALLOCATE(msh(iM)%fa(iFa)%gN)
-!               ALLOCATE(msh(iM)%fa(iFa)%gN(msh(iM)%fa(iFa)%nNo))
-!               msh(iM)%fa(iFa)%gN(1:nNo) = tmpI(:)
-!               msh(iM)%fa(iFa)%gN(nNo+1) = tnNo
-!            END IF
-!         ELSE
-!        Zero out master node if not part of the face
-!            lBc%masN = 0
-!         END IF
-!      ELSE
-!         lBc%masN = 0
-!      END IF
-
 !     Communicating and reordering master node data for clamped Neu BC
       IF (BTEST(lBc%bType,bType_clmpd)) THEN
          CALL cm%bcast(lBc%masN)
@@ -921,7 +881,6 @@
       REAL(KIND=RKIND), ALLOCATABLE :: tmp(:)
 
       CALL cm%bcast(lBc%bType)
-      CALL cm%bcast(lBc%clsFlgRis)
       IF (cm%slv()) ALLOCATE(lBc%eDrn(nsd))
       CALL cm%bcast(lBc%eDrn)
       CALL cm%bcast(lBc%iFa)
@@ -1116,7 +1075,7 @@
       END SUBROUTINE DISTBF
 !--------------------------------------------------------------------
 !     This subroutine distributes constants and parameters of the
-!     constitutive model to all processes
+!     structural constitutive model to all processes
       SUBROUTINE DIST_MATCONSTS(lStM)
       USE COMMOD
       USE ALLFUN
@@ -1220,58 +1179,58 @@
             !END IF
          END DO
          
+         
       END IF
       CALL cm%bcast(lStM%Tf%eta_s)
 
       RETURN
       END SUBROUTINE DIST_MATCONSTS
-
 !--------------------------------------------------------------------
 !     This subroutine distributes constants and parameters of the
 !     excitation-contraction coupling model
       SUBROUTINE DIST_ECMODEL(lEc)
-         USE COMMOD
-         USE ALLFUN
-         IMPLICIT NONE
-         TYPE(eccModelType), INTENT(INOUT) :: lEc
-   
-         CALL cm%bcast(lEc%astress)
-         CALL cm%bcast(lEc%astrain)
-         CALL cm%bcast(lEc%asnType)
-         CALL cm%bcast(lEc%k)
-         CALL cm%bcast(lEc%caCpld)
-         CALL cm%bcast(lEc%fpar_in)
-         IF (.NOT.lEc%caCpld) THEN
-            CALL cm%bcast(lEc%odes%tIntType)
-            CALL cm%bcast(lEc%dt)
-            CALL cm%bcast(lEc%dType)
-            IF (BTEST(lEc%dType, bType_std)) THEN
-               CALL cm%bcast(lEc%Ya)
-            ELSE IF (BTEST(lEc%dType, bType_ustd)) THEN
-               CALL cm%bcast(lEc%Yat%lrmp)
-               CALL cm%bcast(lEc%Yat%d)
-               CALL cm%bcast(lEc%Yat%n)
-               IF (cm%slv()) THEN
-                  ALLOCATE(lEc%Yat%qi(lEc%Yat%d))
-                  ALLOCATE(lEc%Yat%qs(lEc%Yat%d))
-                  ALLOCATE(lEc%Yat%r(lEc%Yat%d,lEc%Yat%n))
-                  ALLOCATE(lEc%Yat%i(lEc%Yat%d,lEc%Yat%n))
-               END IF
-               CALL cm%bcast(lEc%Yat%ti)
-               CALL cm%bcast(lEc%Yat%T)
-               CALL cm%bcast(lEc%Yat%qi)
-               CALL cm%bcast(lEc%Yat%qs)
-               CALL cm%bcast(lEc%Yat%r)
-               CALL cm%bcast(lEc%Yat%i)
+      USE COMMOD
+      USE ALLFUN
+      IMPLICIT NONE
+      TYPE(eccModelType), INTENT(INOUT) :: lEc
+
+      CALL cm%bcast(lEc%astress)
+      CALL cm%bcast(lEc%astrain)
+      CALL cm%bcast(lEc%asnType)
+      CALL cm%bcast(lEc%k)
+      CALL cm%bcast(lEc%caCpld)
+      CALL cm%bcast(lEc%fpar_in)
+      IF (.NOT.lEc%caCpld) THEN
+         CALL cm%bcast(lEc%odes%tIntType)
+         CALL cm%bcast(lEc%dt)
+         CALL cm%bcast(lEc%dType)
+         IF (BTEST(lEc%dType, bType_std)) THEN
+            CALL cm%bcast(lEc%Ya)
+         ELSE IF (BTEST(lEc%dType, bType_ustd)) THEN
+            CALL cm%bcast(lEc%Yat%lrmp)
+            CALL cm%bcast(lEc%Yat%d)
+            CALL cm%bcast(lEc%Yat%n)
+            IF (cm%slv()) THEN
+               ALLOCATE(lEc%Yat%qi(lEc%Yat%d))
+               ALLOCATE(lEc%Yat%qs(lEc%Yat%d))
+               ALLOCATE(lEc%Yat%r(lEc%Yat%d,lEc%Yat%n))
+               ALLOCATE(lEc%Yat%i(lEc%Yat%d,lEc%Yat%n))
             END IF
+            CALL cm%bcast(lEc%Yat%ti)
+            CALL cm%bcast(lEc%Yat%T)
+            CALL cm%bcast(lEc%Yat%qi)
+            CALL cm%bcast(lEc%Yat%qs)
+            CALL cm%bcast(lEc%Yat%r)
+            CALL cm%bcast(lEc%Yat%i)
          END IF
-         CALL cm%bcast(lEc%eta_s)
-   
-         RETURN
-         END SUBROUTINE DIST_ECMODEL
+      END IF
+      CALL cm%bcast(lEc%eta_s)
+
+      RETURN
+      END SUBROUTINE DIST_ECMODEL
 !--------------------------------------------------------------------
 !     This subroutine distributes constants and parameters of the
-!     constitutive model to all processes
+!     fluid viscosity constitutive model to all processes
       SUBROUTINE DIST_VISCMODEL(lVis)
       USE COMMOD
       USE ALLFUN
@@ -1628,7 +1587,6 @@ c            wrn = " ParMETIS failed to partition the mesh"
          END DO
          DEALLOCATE(tmpR)
       END IF
-
 
 !     lM%gN: gnNo --> gtnNo
 !     part:  nNo  --> gtnNo

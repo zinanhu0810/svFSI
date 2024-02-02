@@ -75,8 +75,10 @@
                   OPEN(fid, FILE=cplBC%saveName, POSITION='APPEND')
                   WRITE(fid,'(ES14.6E2)',ADVANCE='NO') cplBC%xp(1)
                   DO i=1, cplBC%nX
-                     WRITE(fid,'(2(1X,ES14.6E2))',ADVANCE='NO')
-     2                  cplBC%xn(i), cplBC%fa(i)%y
+                     WRITE(fid,'(ES14.6E2)',ADVANCE='NO') cplBC%xn(i)
+                  END DO
+                  DO i=1, cplBC%nFa
+                     WRITE(fid,'(ES14.6E2)',ADVANCE='NO') cplBC%fa(i)%y
                   END DO
                   DO i=2, cplBC%nXp
                      WRITE(fid,'(ES14.6E2)',ADVANCE='NO') cplBC%xp(i)
@@ -95,6 +97,7 @@
 !     Don't write it when it doesn't suppose to be written
             wtn = eq(iEq)%output(iOut)%wtn(2:3)
             IF (ALL(.NOT.wtn)) CYCLE
+!            IF( RisnbrIter .LE. 50) CYCLE
             l = eq(iEq)%output(iOut)%l
             s = eq(iEq)%s + eq(iEq)%output(iOut)%o
             e = s + l - 1
@@ -119,7 +122,7 @@
                END DO
                l = 1
             CASE (outGrp_eFlx, outGrp_hFlx, outGrp_divV, outGrp_J,
-     2         outGrp_Mises)
+     2         outGrp_Mises, outGrp_fS)
                CALL ALLPOST(tmpV, Yn, Dn, oGrp, iEq)
             CASE (outGrp_absV)
                DO a=1, tnNo
@@ -354,6 +357,7 @@
       LOGICAL :: lTH
       INTEGER(KIND=IKIND) iM, iFa, fid, i, iDmn
       REAL(KIND=RKIND) tmp
+      REAL(KIND=RKIND), ALLOCATABLE :: sA(:)
 
       fid = 1
       DO i=1, 2
@@ -369,7 +373,15 @@
                DO iFa=1, msh(iM)%nFa
                   IF (m .EQ. 1) THEN
                      IF (div) THEN
-                        tmp = msh(iM)%fa(iFa)%area
+                        IF(ALLOCATED(sA)) DEALLOCATE(sA)
+                        ALLOCATE(sA(tnNo))
+                        sA   = 1._RKIND
+                        tmp = Integ(msh(iM)%fa(iFa), sA)
+                !        tmp = msh(iM)%fa(iFa)%area
+!                        IF (cm%mas()) THEN
+!                           print*,"now area is ", tmp
+!                           print*,"og area is ", msh(iM)%fa(iFa)%area
+!                        END IF
                         tmp = Integ(msh(iM)%fa(iFa),tmpV,1)/tmp
                      ELSE
                         IF (pFlag .AND. lTH) THEN
