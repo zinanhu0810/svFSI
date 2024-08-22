@@ -461,8 +461,8 @@
                outDof = outDof + eq(iEq)%output(iOut)%l
             END IF
 
-            IF (oGrp.EQ.outGrp_J .OR. oGrp.EQ.outGrp_Mises .OR.
-     2          oGrp.EQ.outGrp_I1) nOute = nOute + 1
+            IF (oGrp.EQ.outGrp_J .OR. oGrp.EQ.outGrp_Mises)
+     2         nOute = nOute + 1
          END DO
       END DO
 
@@ -526,7 +526,7 @@
                outNames(cOut) = TRIM(eq(iEq)%output(iOut)%name)
 
                SELECT CASE (oGrp)
-               CASE (outGrp_NA)
+                  CASE (outGrp_NA)
                   err = "Undefined output grp in VTK"
 
                CASE (outGrp_A)
@@ -572,9 +572,8 @@
                   IF (ALLOCATED(tmpV)) DEALLOCATE(tmpV)
                   ALLOCATE(tmpV(nFn*nsd,msh(iM)%nNo))
                   tmpV = 0._RKIND
-                  IF (msh(iM)%nFn .NE. 0) THEN
-                     CALL FIBDIRPOST(msh(iM), nFn, tmpV, lD, iEq)
-                  END IF
+                  IF (msh(iM)%nFn .NE. 0)
+     2               CALL FIBDIRPOST(msh(iM), nFn, tmpV, lD, iEq)
                   DO iFn=1, nFn
                      cOut = cOut + 1
                      is   = outS(cOut)
@@ -591,13 +590,11 @@
                   ALLOCATE(tmpV(maxnsd,msh(iM)%nNo))
 
                CASE (outGrp_fA)
-!                 Fiber alignment computed only for 2 fibers (nFn = 2)
                   IF (ALLOCATED(tmpV)) DEALLOCATE(tmpV)
                   ALLOCATE(tmpV(1,msh(iM)%nNo))
                   tmpV = 0._RKIND
-                  IF (msh(iM)%nFn .EQ. 2) THEN
-                     CALL FIBALGNPOST(msh(iM), tmpV, lD, iEq)
-                  END IF
+                  IF (msh(iM)%nFn .EQ. 2)
+     2               CALL FIBALGNPOST(msh(iM), tmpV, lD, iEq)
                   DO a=1, msh(iM)%nNo
                      d(iM)%x(is,a) = tmpV(1,a)
                   END DO
@@ -616,13 +613,8 @@
                      END DO
                   END IF
 
-                  IF (msh(iM)%lShl) THEN
-                     CALL SHLPOST(msh(iM), l, tmpV, tmpVe, lD, iEq,oGrp)
-                  ELSE
-                     IF (.NOT.cmmInit) CALL TPOST(msh(iM), l, tmpV,
-     2                  tmpVe, lD, lY, iEq, oGrp)
-                  END IF
-
+                  IF (.NOT.cmmInit) CALL TPOST(msh(iM), l, tmpV, tmpVe,
+     2               lD, lY, iEq, oGrp)
                   DO a=1, msh(iM)%nNo
                      d(iM)%x(is:ie,a) = tmpV(1:l,a)
                   END DO
@@ -638,20 +630,13 @@
                   DEALLOCATE(tmpV, tmpVe)
                   ALLOCATE(tmpV(maxnsd,msh(iM)%nNo))
 
-               CASE (outGrp_J, outGrp_F, outGrp_strain, outGrp_fS,
-     2               outGrp_C, outGrp_I1 )
+               CASE (outGrp_J, outGrp_F, outGrp_strain)
                   IF (ALLOCATED(tmpV)) DEALLOCATE(tmpV)
                   ALLOCATE(tmpV(l,msh(iM)%nNo), tmpVe(msh(iM)%nEl))
                   tmpV  = 0._RKIND
                   tmpVe = 0._RKIND
 
-                  IF (msh(iM)%lShl) THEN
-                     CALL SHLPOST(msh(iM), l, tmpV, tmpVe, lD, iEq,oGrp)
-                  ELSE
-                     CALL TPOST(msh(iM), l, tmpV, tmpVe, lD, lY, iEq,
-     2                  oGrp)
-                  END IF
-
+                  CALL TPOST(msh(iM), l, tmpV, tmpVe, lD, lY, iEq, oGrp)
                   DO a=1, msh(iM)%nNo
                      d(iM)%x(is:ie,a) = tmpV(1:l,a)
                   END DO
@@ -659,14 +644,6 @@
                   IF (oGrp .EQ. outGrp_J) THEN
                      nOute = nOute + 1
                      outNamesE(nOute) = "E_Jacobian"
-                     DO a=1, msh(iM)%nEl
-                        d(iM)%xe(nOute,a) = tmpVe(a)
-                     END DO
-                  END IF
-
-                  IF (oGrp .EQ. outGrp_I1) THEN
-                     nOute = nOute + 1
-                     outNamesE(nOute) = "E_CG_I1"
                      DO a=1, msh(iM)%nEl
                         d(iM)%xe(nOute,a) = tmpVe(a)
                      END DO
@@ -709,7 +686,7 @@
       nEl = 0
       DO iM=1, nMsh
          IF (msh(iM)%eType .EQ. eType_NRB) THEN
-            CALL INTNRBDATA(msh(iM), d(iM), outDof, nOute)
+            CALL INTNRBDATA(msh(iM), d(iM), outDof)
          ELSE
             CALL INTMSHDATA(msh(iM), d(iM), outDof, nOute)
          END IF
@@ -1041,22 +1018,21 @@
 !     This routine will interpolates NURBS into a QUD4/HEX8 mesh, so you
 !     can write it into a VTK file.
 !     TODO: Element data are not written to VTK file for NURBS
-      SUBROUTINE INTNRBDATA(lM, d, outDof, nOute)
+      SUBROUTINE INTNRBDATA(lM, d, outDof)
       USE COMMOD
       USE ALLFUN
       IMPLICIT NONE
       TYPE(mshType), INTENT(IN) :: lM
       TYPE(dataType), INTENT(INOUT) :: d
-      INTEGER(KIND=IKIND), INTENT(IN) :: outDof, nOute
+      INTEGER(KIND=IKIND), INTENT(IN) :: outDof
 
       LOGICAL flag, clcDmn
       INTEGER(KIND=IKIND) ie, e, ex, ey, ez, s, sx, sy, sz, ia, Ac, a,
-     2   ax, ay, az, jx, jy, jz, ierr, i, nShft, insd, m
+     2   ax, ay, az, jx, jy, jz, ierr, i, nShft, insd
 
       INTEGER(KIND=IKIND), ALLOCATABLE :: IEN(:,:), tDmnId(:), sCe(:),
      2   dise(:), sCn(:), disn(:)
-      REAL(KIND=RKIND), ALLOCATABLE :: N(:,:), tmpX(:,:), tmpI(:),
-     2   lDe(:,:), gDe(:,:)
+      REAL(KIND=RKIND), ALLOCATABLE :: N(:,:), tmpX(:,:)
 
       insd = nsd
       IF (lM%lShl) insd = nsd - 1
@@ -1095,7 +1071,6 @@
          d%nEl = 0
          d%nNo = 0
       END IF
-
       ALLOCATE(d%IEN(d%eNoN,d%nEl), d%gx(outDof,d%nNo),
      2   IEN(d%eNoN,sCe(cm%tF())), tmpX(outDof,sCn(cm%tF())),
      3   N(lM%eNoN,lM%nSl))
@@ -1110,14 +1085,23 @@
 !     This would be the number of nodes in the lower procesors
       nShft = disn(cm%id())
 
-!     Element variables
       clcDmn = .FALSE.
-      m = nOute
-      IF (.NOT.savedOnce .OR. nMsh.GT.1) THEN
-         IF (savedOnce) THEN
-            m = m + 1
-         ELSE
-            m = m + 2
+      IF (.NOT.savedOnce) THEN
+         ALLOCATE(d%xe(d%nEl,2))
+         IF (cm%mas()) THEN
+!     Based on the two posible fields
+            IF (.NOT.cm%seq()) THEN
+               i = 0
+               DO e=1, d%nEl
+                  IF (e .GT. dise(i)) THEN
+                     DO
+                        i = i + 1
+                        IF (e .LE. dise(i)) EXIT
+                     END DO
+                  END IF
+                  d%xe(e,1) = i
+               END DO
+            END IF
          END IF
          IF (ALLOCATED(dmnId)) THEN
             ALLOCATE(tDmnId(sCe(cm%tF())))
@@ -1128,17 +1112,6 @@
             END IF
          END IF
       END IF
-
-      IF (ALLOCATED(d%xe)) THEN
-         ALLOCATE(lDe(nOute,lM%nEl))
-         DO e=1, lM%nEl
-            DO i=1, nOute
-               lDe(i,e) = d%xe(i,e)
-            END DO
-         END DO
-         DEALLOCATE(d%xe)
-      END IF
-      IF (m .NE. 0) ALLOCATE(d%xe(d%nEl,m))
 
       ie = 0
       IF (insd .EQ. 2) THEN
@@ -1247,6 +1220,9 @@
          d%gx  = tmpX
          d%IEN = IEN
       ELSE
+         IF (ALLOCATED(tDmnId)) CALL MPI_GATHERV(tDmnId, sCe(cm%tF()),
+     2      mpint, d%xe(:,2), sCe, dise, mpint, master, cm%com(), ierr)
+
 !     First collecting all the elements connectivity
          sCe  = sCe*d%eNoN
          sCn  = sCn*outDof
@@ -1257,80 +1233,6 @@
 !     Now collecting the solutions
          CALL MPI_GATHERV(tmpX, sCn(cm%tF()), mpreal, d%gx, sCn, disn,
      2      mpreal, master, cm%com(), ierr)
-         sCe  = sCe/d%eNoN
-         dise = dise/d%eNoN
-      END IF
-
-!     Default element variables (Domain_ID, Proc_ID)
-      m = 0
-      IF (.NOT.savedOnce .OR. nMsh.GT.1) THEN
-!        Domain ID
-         m = 1
-         IF (ALLOCATED(dmnId)) THEN
-            ALLOCATE(tmpI(d%nEl))
-            CALL MPI_GATHERV(tDmnId, sCe(cm%tF()), mpint, tmpI, sCe,
-     2         dise, mpint, master, cm%com(), ierr)
-            IF (cm%mas()) THEN
-               DO e=1, d%nEl
-                  d%xe(e,1) = REAL(tmpI(e), KIND=RKIND)
-               END DO
-            END IF
-            DEALLOCATE(tmpI)
-         ELSE
-            d%xe(:,m) = 1._RKIND
-         END IF
-
-         IF (.NOT.savedOnce) THEN
-!           Proc_ID for parallel run
-            m = m + 1
-            IF (cm%mas()) THEN
-               IF (.NOT.cm%seq()) THEN
-                  i = 0
-                  DO e=1, d%nEl
-                     IF (e .GT. dise(i)) THEN
-                        DO
-                           i = i + 1
-                           IF (e .LE. dise(i)) EXIT
-                        END DO
-                     END IF
-                     d%xe(e,m) = REAL(i, KIND=RKIND)
-                  END DO
-               END IF
-            END IF
-         END IF
-      END IF
-
-      IF (ALLOCATED(lDe)) THEN
-         IF (cm%seq()) THEN
-            DO e=1, d%nEl
-               DO i=1, nOute
-                  d%xe(i,m+1) = lDe(i,e)
-               END DO
-            END DO
-            DEALLOCATE(lDe)
-         ELSE
-            sCe = sCe*nOute
-            dise = dise*nOute
-            IF (cm%mas()) THEN
-               ALLOCATE(gDe(nOute,d%nEl))
-            ELSE
-               ALLOCATE(gDe(0,0))
-            END IF
-
-            CALL MPI_GATHERV(lDe, sCe(cm%tF()), mpreal, gDe, sCe, dise,
-     2         mpreal, master, cm%com(), ierr)
-
-            IF (cm%mas()) THEN
-               DO e=1, d%nEl
-                  DO i=1, nOute
-                     d%xe(i,m+1) = gDe(i,e)
-                  END DO
-               END DO
-            END IF
-            DEALLOCATE(lDe, gDe)
-            sCe  = sCe/nOute
-            dise = dise/nOute
-         END IF
       END IF
 
       RETURN

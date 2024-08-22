@@ -36,7 +36,7 @@
 !
 !--------------------------------------------------------------------
 
-      SUBROUTINE CONSTRUCT_CONTACTPNLTY(Dg)
+      SUBROUTINE CONTACTFORCES(Dg)
       USE COMMOD
       USE ALLFUN
       IMPLICIT NONE
@@ -44,7 +44,7 @@
 
       LOGICAL :: flag
       INTEGER(KIND=IKIND) :: i, j, k, l, m, iM, jM, e, a, Ac, b, Bc, g,
-     2   eNoN, nNb, insd, maxNnb
+     2   eNoN, insd, nnb, maxNnb
       REAL(KIND=RKIND) :: kl, hl, w, Jac, al, c, d, pk, nV1(nsd),
      2   nV2(nsd), x1(nsd), x2(nsd), x12(nsd), xmin(nsd), xmax(nsd)
 
@@ -197,14 +197,6 @@
                   lR(1:nsd,Ac) = lR(1:nsd,Ac) - pk*nV1(:)
                END IF
             END IF
-            ! IF (Ac.EQ.40 .AND. Bc.EQ.627) THEN
-            !    PRINT *, Ac, Bc, lR(:,Ac)
-            ! ELSE IF (Ac.EQ.301 .AND. Bc.EQ.546) THEN
-            !    PRINT *, Ac, Bc, d
-            ! END IF
-            ! IF (NORM(lR(:, Ac)) > 0.00000001_RKIND) THEN
-            !    PRINT *, Ac, Bc, lR(:,Ac)
-            ! END IF
          END DO
          IF (nNb .NE. 0) lR(:,Ac) = lR(:,Ac) / REAL(nNb, KIND=RKIND)
       END DO
@@ -221,6 +213,5 @@
       DEALLOCATE(lR, incNd)
 
       RETURN
-      END SUBROUTINE CONSTRUCT_CONTACTPNLTY
-
+      END SUBROUTINE CONTACTFORCES
 !####################################################################

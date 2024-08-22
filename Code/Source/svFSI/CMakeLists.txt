@@ -34,8 +34,8 @@ include_directories(${SV_SOURCE_DIR}/ThirdParty/tetgen/simvascular_tetgen)
 include_directories(${MPI_C_INCLUDE_PATH})
 
 if(CMAKE_Fortran_COMPILER_ID MATCHES "GNU")
-   set(CMAKE_Fortran_FLAGS "-O3 -DNDEBUG -march=native")
-   set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -cpp -pthread -std=legacy")
+  set(CMAKE_Fortran_FLAGS "-O3 -DNDEBUG -march=native")
+  set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -cpp -pthread -std=legacy")
 
   # Use below flags for debugging
   # set(CMAKE_Fortran_FLAGS "-O0")
@@ -112,7 +112,6 @@ set(FSRCS TYPEMOD.f
          CHNL.f
          LIST.f
          MATFUN.f
-         ECMOD_DCPLD.f
          CEPMOD_AP.f
          CEPMOD_FN.f
          CEPMOD_TTP.f
@@ -128,7 +127,6 @@ set(FSRCS TYPEMOD.f
          CONTACT.f
          DEBUG.f
          DISTRIBUTE.f
-         EC_DCPLD.f
          EQASSEM.f
          FFT.f
          FLUID.f
@@ -160,6 +158,7 @@ set(FSRCS TYPEMOD.f
          STOKES.f
          STRUCT.f
          TXT.f
+         URIS.f
          USTRUCT.f
          VTKXML.f)
 
@@ -215,7 +214,7 @@ if(CMAKE_Fortran_COMPILER_ID MATCHES "GNU")
 elseif(CMAKE_Fortran_COMPILER_ID MATCHES "Intel")
   set_target_properties(svFSI PROPERTIES LINKER_LANGUAGE Fortran)
   target_link_libraries(${SV_SVFSI_EXE} -mkl)
-endif()
+endif()  
 
 # extra MPI libraries only if there are not set to NOT_FOUND or other null
 if(SV_MPI_EXTRA_LIBRARY)

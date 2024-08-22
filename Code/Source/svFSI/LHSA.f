@@ -67,6 +67,31 @@
                   colN = msh(iM)%IEN(b,e)
                   CALL ADDCOL(rowN, colN)
                END DO
+!               PRINT*,"before risFlg"
+!              Add extra connections for cooresponding nodes in case of RIS
+               IF( risFlag ) THEN 
+!                 If rowN is in the list of ris nodes   
+                  mapIdx = FINDLOC(grisMap, rowN)
+                  IF(mapIdx(1).NE.0) THEN 
+!                      print*,rowN, "RIS found ", rowN
+                      print*,nMsh
+                     DO jM=1, 2 
+!                        PRINT*, "jM is", jM 
+                        IF(jM .EQ. iM) CYCLE
+                        rowN = grisMap(jM, mapIdx(2))
+
+
+!                        PRINT*, msh(iM)%eNoN
+                        DO b=1, msh(iM)%eNoN
+                           colN = msh(iM)%IEN(b,e)
+!                            write(*,*)" adding node ", colN
+                           CALL ADDCOL(rowN, colN)
+!                           PRINT*,"end one"
+                        END DO
+                     END DO
+                  END IF
+               END IF
+
             END DO
          END DO
       END DO
@@ -74,7 +99,7 @@
 !     Treat shells with triangular elements here
       DO iM=1, nMsh
          IF (.NOT.shlEq .OR. .NOT.msh(iM)%lShl) CYCLE
-         IF (msh(iM)%eType .NE. eType_TRI3) CYCLE
+         IF (msh(iM)%eType .EQ. eType_NRB) CYCLE
          DO e=1, msh(iM)%nEl
             DO a=1, 2*msh(iM)%eNoN
                IF (a .LE. msh(iM)%eNoN) THEN
@@ -92,30 +117,11 @@
                   IF (colN .EQ. 0) CYCLE
                   CALL ADDCOL(rowN, colN)
                END DO
-!             Add extra connections for cooresponding nodes in case of RIS
-               IF( risFlag ) THEN 
-!                 If rowN is in the list of ris nodes   
-                  mapIdx = FINDLOC(grisMap, rowN)
-                  IF(mapIdx(1).NE.0) THEN 
-C                      print*,rowN, "RIS found ", rowN
-                     DO jM=1, nMsh  
-                        IF(jM .EQ. iM) CYCLE
-                        rowN = grisMap(jM, mapIdx(2))
-
-                        DO b=1, msh(iM)%eNoN
-                           colN = msh(iM)%IEN(b,e)
-C                            write(*,*)" adding node ", colN
-                           CALL ADDCOL(rowN, colN)
-                        END DO
-                     END DO
-                  END IF
-               END IF
-
             END DO
          END DO
       END DO
 
-!     Now reset idMap for clamped Neumann BC faces. Then insert
+!     Now reset idMap for undeforming Neumann BC faces. Then insert
 !     master node as a column entry in each row for all the slave nodes.
 !     This step is performed even for ghost master nodes where the idMap
 !     points to the ghost master node.
@@ -124,7 +130,7 @@ C                            write(*,*)" adding node ", colN
          DO j=1, eq(i)%nBc
             iM  = eq(i)%bc(j)%iM
             iFa = eq(i)%bc(j)%iFa
-            IF (BTEST(eq(i)%bc(j)%bType, bType_clmpd)) THEN
+            IF (BTEST(eq(i)%bc(j)%bType, bType_undefNeu)) THEN
                masN = eq(i)%bc(j)%masN
                IF (masN .EQ. 0) CYCLE
                DO a=1, msh(iM)%fa(iFa)%nNo
@@ -244,7 +250,7 @@ C                            write(*,*)" adding node ", colN
 !           If column entry already exists, exit
             IF (col .EQ. uInd(i,row)) EXIT
 
-!           If we are this point, then the current entry is bigger.
+!           If we are this point, then then the current entry is bigger.
 !           Shift all the entries from here to the end of the list. If
 !           list is full, we request a larger list, otherwise we shift
 !           and add the item at the current entry position.
@@ -316,3 +322,5 @@ C                            write(*,*)" adding node ", colN
       RETURN
       END SUBROUTINE DOASSEM
 !####################################################################
+
+

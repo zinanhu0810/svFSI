@@ -42,11 +42,17 @@
       IMPLICIT NONE
 
       LOGICAL l1, l2, l3
-      INTEGER(KIND=IKIND) i, j, iM, iBc, ierr, iEqOld, stopTS
+      INTEGER(KIND=IKIND) i, iM, iBc, ierr, iEqOld, stopTS, j
       REAL(KIND=RKIND) timeP(3)
 
       INTEGER(KIND=IKIND), ALLOCATABLE :: incL(:)
       REAL(KIND=RKIND), ALLOCATABLE :: Ag(:,:), Yg(:,:), Dg(:,:), res(:)
+
+      REAL(KIND=RKIND) v1(3), v2(3), v3(3), v4(3), p(3), V(3,2)
+      REAL(KIND=RKIND)  v41(3), vp1(3), N(3), dotV4, dotP
+      INTEGER(KIND=IKIND) same, RIS0DREDO
+
+      RIS0DREDO = 10
 
       IF (IKIND.NE.LSIP .OR. RKIND.NE.LSRP) THEN
          STOP "Incompatible datatype precision between solver and FSILS"
@@ -71,14 +77,13 @@
 
 !     Doing the partitioning and distributing the data to the all
 !     Processors
-      PRINT*,"to call distribute"
       CALL DISTRIBUTE
-
+      
 !     Initializing the solution vectors and constructing LHS matrix
 !     format
       CALL INITIALIZE(timeP)
       stopTS = nTS
-
+      
       dbg = 'Allocating intermediate variables'
       ALLOCATE(Ag(tDof,tnNo), Yg(tDof,tnNo), Dg(tDof,tnNo),
      2   res(nFacesLS), incL(nFacesLS))
@@ -97,6 +102,7 @@
 !     variables, i.e. An, Yn, and Dn
          cTS    = cTS + 1
          time   = time + dt
+
 ! --- RIS GOTO 1 should be here, we do not update the time but we redo all the rest          
 11       cEq    = 1
          eq%itr = 0
@@ -118,7 +124,6 @@
          DO
             iEqOld = cEq
 
-!           cplBC is invoked only for the first equation
             IF (cplBC%coupled .AND. cEq.EQ.1) THEN
                CALL SETBCCPL
                CALL SETBCDIR(An, Yn, Dn)
@@ -157,7 +162,7 @@
             IF (ris0DFlag)  CALL RIS0D_BC(Yg, Dg)
 
 !        Apply contact model and add its contribution to residue
-            IF (iCntct) CALL CONSTRUCT_CONTACTPNLTY(Dg)
+            IF (iCntct) CALL CONTACTFORCES(Dg)
 
 !        Synchronize R across processes. Note: that it is important
 !        to synchronize residue, R before treating immersed bodies as
@@ -176,8 +181,7 @@
                CALL THOOD_ValRC()
             END IF
 
-!        Update LHS for clamped BC
-            CALL SETBC_CLMPD()
+            CALL SETBCUNDEFNEU()
 
 !        IB treatment: for explicit coupling, simply construct residue.
             IF (ibFlag) THEN
@@ -210,6 +214,7 @@
 !        Writing out the time passed, residual, and etc.
             IF (ALL(eq%ok)) EXIT
             CALL OUTRESULT(timeP, 2, iEqOld)
+
          END DO
 !     End of inner loop
 
@@ -274,19 +279,11 @@
 
          IF (ibFlag) CALL IB_OUTCPUT()
 
-!     Exiting outer loop if l1
-         IF (l1) EXIT
-
-!     Solution is stored here before replacing it at next time step
-         Ao = An
-         Yo = Yn
-         IF (dFlag) Do = Dn
-         cplBC%xo = cplBC%xn
-
 ! ---- Here we probably have to update the ris resistance value
 ! ---- If the state has to change, we recompute this time step GOTO 1
-! ---- Control where if the time and the new has changed! 
-         IF ((cEq.EQ.1) .AND. risFlag ) THEN 
+! ---- Control where if the time and the new has changed!
+         write(*,*) "CHECK RIS: ", cEq, risFlag 
+         IF ((cEq .GE. 1) .AND. risFlag ) THEN 
             CALL RIS_MEANQ
             CALL RIS_UPDATER
 
@@ -300,15 +297,62 @@
          END IF
 
          IF ((cEq.EQ.1) .AND. ris0DFlag ) THEN 
-            write(*,*)" Iteration : " , cTS
             CALL RIS0D_STATUS
-!           print*, " RisnbrIter = " , RisnbrIter
 
-
-!          Redo the fluid iteration without updating the time 
-!           IF( RisnbrIter .LE. 2) GOTO 11
+!          edo the fluid iteration without updating the time 
+           IF( RisnbrIter .LE. 10) GOTO 11
 
          END IF
+
+!        Part related to unfitted RIS
+!        If the valve is active, look at the pressure difference 
+         IF(urisFlag) THEN 
+
+            IF( urisActFlag ) THEN 
+               cntURIS = cntURIS + 1
+
+               IF(.NOT.((cTS.GE.10).AND.(cntURIS .LT. 10))) THEN 
+                  CALL URIS_MEANP  
+               END IF
+
+               !CALL URIS_MEANV 
+               IF( cntURIS .EQ. 0) THEN 
+                  IF( cntURIS .LT. 10) GOTO 11
+               END IF
+
+            ELSE 
+               cntURIS = cntURIS + 1
+               
+               IF(.NOT.((cTS.GE.10).AND.(cntURIS .LT. 10))) THEN 
+                  CALL URIS_MEANV  
+               END IF
+
+               !CALL URIS_MEANV 
+               IF( cntURIS .EQ. 0) THEN 
+                  IF( cntURIS .LT. 10) GOTO 11
+               END IF
+
+            END IF
+
+C             IF( time .EQ. 0.5) urisActFlag = .FALSE.
+
+            IF (mvMsh) THEN 
+               CALL URIS_UpdateDisp !(Do,Dn)
+            END IF
+            CALL URIS_WRITEVTUS(uris%Yd)
+         END IF
+!---     end RIS/URIS stuff 
+
+
+!     Solution is stored here before replacing it at next time step
+         Ao = An
+         Yo = Yn
+         IF (dFlag) Do = Dn
+         cplBC%xo = cplBC%xn
+!     Exiting outer loop if l1
+         IF (l1) EXIT
+
+
       END DO
 !     End of outer loop
 

@@ -74,6 +74,8 @@
 !        ERROR. HERRE FOR ALE, recompure the area with the new displacement 
          tmp = msh(iM)%fa(iFa)%area
          RIS%meanP(i) = Integ(msh(iM)%fa(iFa),tmpV,1)/tmp
+         write(*,*) "loop, tmp, iM", tmp, iM, iFa, SHAPE(tmpV),
+     2     tmpV(:,1:10)
       END DO
 
 !     For the velocity 
@@ -230,8 +232,16 @@
          Ec    = lFa%gE(e)
          cDmn  = DOMAIN(lM, cEq, Ec)
          cPhys = eq(cEq)%dmn(cDmn)%phys
-         IF (cPhys .NE. phys_fluid) err = "Weakly applied Dirichlet "//
-     2      "BC is allowed for fluid phys only"
+!         IF (cPhys .NE. phys_fluid) err = "Weakly applied Dirichlet "//
+!     2      "BC is allowed for fluid phys only"
+         IF (cPhys .NE. phys_fluid) THEN
+            IF (.NOT. risFlag) THEN
+                err = "Weakly applied Dirichlet BC is allowed for " //
+     2          "fluid phys only, skipping"
+            ELSE
+                CYCLE
+            END IF
+         END IF
 
 !        Initialize local residue and stiffness
          lR = 0._RKIND
@@ -488,8 +498,8 @@ C      2                                         lK(nsd+2:2*nsd+2,a,b)
 
          rowN = eqN(a)
          IF (rowN .EQ. 0) CYCLE
-         mapIdx = FINDLOC(grisMap, rowN)      
-  
+         mapIdx = FINDLOC(grisMap, rowN)
+         
          IF(mapIdx(1).EQ.0) CYCLE 
 
          DO jM=1, nMsh  
@@ -617,14 +627,15 @@ C      2                                         lK(nsd+2:2*nsd+2,a,b)
             lBc%bType   = IBSET(lBc%bType,bType_std)
             lBc%bType   = IBSET(lBc%bType,bType_flat)
             lBc%bType   = IBSET(lBc%bType,bType_flx)
-
+            
             ALLOCATE(lBc%eDrn(nsd))
             lBc%eDrn = 0
 
 !           Apply bc Dir 
             ALLOCATE(lBc%gx(msh(iM)%fa(iFa)%nNo))
             lBc%gx = 1._RKIND
-
+            
+!            IF (cm%mas()) PRINT*, "RIS bc in DIR0"
             CALL SETBCDIRWL(lBc, msh(iM), msh(iM)%fa(iFa), Yg, Dg)
 
             DEALLOCATE(lBc%gx)
@@ -632,6 +643,8 @@ C      2                                         lK(nsd+2:2*nsd+2,a,b)
          ELSE 
 
 !           Apply Neu bc 
+            lBc%bType   = IBSET(lBc%bType,bType_Neu)
+!            IF (cm%mas()) PRINT*, "RIS bc in NEU"
             CALL SETBCNEUL(eq(cEq)%bc(iBc), msh(iM)%fa(iFa), Yg, Dg)
 
          END IF
@@ -675,10 +688,6 @@ C      2                                         lK(nsd+2:2*nsd+2,a,b)
 
          tmpV(1:m,:) = Yn(s:e,:)
 
-C          IF( msh(iM)%fa(iFa)%nEl .EQ. 0) THEN 
-C             write(*,*), " outside RIS0D_STATUS proc ", cm%id() 
-C             RETURN
-C          END IF
 
          tmp = msh(iM)%fa(iFa)%area
          !meanP = Integ(msh(iM)%fa(iFa),tmpV,1)/tmp
@@ -687,9 +696,7 @@ C          END IF
          lFa = msh(iM)%fa(iFa)
 !        such update may be not correct
          tmp_new = Integ(lFa, sA)
-!         print*, "area og is ", tmp
-!         print*, "area up is ", tmp_new
-         meanP = Integ(msh(iM)%fa(iFa),tmpV,1,m)/tmp_new
+         meanP = Integ(msh(iM)%fa(iFa),tmpV,1,m)/tmp
 
 !        For the velocity 
          m = nsd
@@ -711,8 +718,11 @@ C          END IF
          IF (ALLOCATED(tmpV)) DEALLOCATE(tmpV)
 
          RisnbrIter = RisnbrIter + 1
-         IF( RisnbrIter .LE. 25) THEN 
-            IF (.NOT.cm%seq()) CALL cm%bcast(RisnbrIter)  
+         IF( RisnbrIter .LE. 35) THEN 
+            IF (.NOT.cm%seq()) CALL cm%bcast(RisnbrIter) 
+            IF (cm%mas()) THEN
+               PRINT*,"the current status is ",eq(cEq)%bc(iBc)%clsFlgRis
+            END IF 
             RETURN
          END IF
 

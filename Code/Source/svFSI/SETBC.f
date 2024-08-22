@@ -48,6 +48,7 @@
       REAL(KIND=RKIND) :: c1, c1i, c2
 
       REAL(KIND=RKIND), ALLOCATABLE :: tmpA(:,:), tmpY(:,:)
+
       INTEGER(KIND=IKIND) found, M, Fa
 
       DO iEq=1, nEq
@@ -241,7 +242,7 @@
          iM  = eq(cEq)%bc(iBc)%iM
 
          IF (BTEST(eq(cEq)%bc(iBc)%bType,bType_Ris0D)) CYCLE
-
+         
          IF (BTEST(eq(cEq)%bc(iBc)%bType,bType_Neu)) THEN
             CALL SETBCNEUL(eq(cEq)%bc(iBc), msh(iM)%fa(iFa), Yg, Dg)
          ELSE IF (BTEST(eq(cEq)%bc(iBc)%bType,bType_trac)) THEN
@@ -272,6 +273,7 @@
       IF (BTEST(lBc%bType,bType_cpl) .OR.
      2    BTEST(lBc%bType,bType_RCR)) THEN
          h(1) = lBc%g
+!         IF(cm%mas()) PRINT*, lBc%g
       ELSE
          IF (BTEST(lBc%bType,bType_gen)) THEN
 !     Using "hl" as a temporary variable here
@@ -303,6 +305,9 @@
             Ac     = lFa%gN(a)
             hg(Ac) = -h(1)*lBc%gx(a)
          END DO
+!         IF(cm%mas()) PRINT*,"here hg", nNo
+!         IF(cm%mas()) PRINT*,"hg(1)",hg(1)
+!         IF(cm%mas()) PRINT*,"hg(10)",hg(10)
       END IF
 
 !     Add Neumann BCs contribution to the LHS/RHS
@@ -627,14 +632,14 @@
       RETURN
       END SUBROUTINE SETBCRBNL
 !####################################################################
-!     Treat Neumann boundaries that are clamped and do not deform.
+!     Treat Neumann boundaries that are not deforming.
 !     Leave the row corresponding to the master node of the owner
 !     process in the LHS matrix and the residue vector untouched. For
 !     all the other nodes of the face, set the residue to be 0 for
 !     velocity dofs. Zero out all the elements of corresponding rows of
 !     the LHS matrix. Make the diagonal elements of the LHS matrix equal
 !     to 1 and the column entry corresponding to the master node, -1
-      SUBROUTINE SETBC_CLMPD
+      SUBROUTINE SETBCUNDEFNEU
       USE COMMOD
       IMPLICIT NONE
 
@@ -643,20 +648,15 @@
       DO iBc=1, eq(cEq)%nBc
          iFa = eq(cEq)%bc(iBc)%iFa
          iM  = eq(cEq)%bc(iBc)%iM
-         IF (BTEST(eq(cEq)%bc(iBc)%bType,bType_clmpd)) THEN
-            IF (nsd .EQ. 2) THEN
-               CALL SETBC_CLMPD2D(eq(cEq)%bc(iBc), msh(iM)%fa(iFa))
-            ELSE
-               CALL SETBC_CLMPD3D(eq(cEq)%bc(iBc), msh(iM)%fa(iFa))
-            END IF
+         IF (BTEST(eq(cEq)%bc(iBc)%bType,bType_undefNeu)) THEN
+            CALL SETBCUNDEFNEUL(eq(cEq)%bc(iBc), msh(iM)%fa(iFa))
          END IF
       END DO
 
       RETURN
-      END SUBROUTINE SETBC_CLMPD
+      END SUBROUTINE SETBCUNDEFNEU
 !--------------------------------------------------------------------
-!     Set clamped BC for 2D problems
-      SUBROUTINE SETBC_CLMPD2D(lBc, lFa)
+      SUBROUTINE SETBCUNDEFNEUL(lBc, lFa)
       USE COMMOD
       USE ALLFUN
       IMPLICIT NONE
@@ -668,28 +668,7 @@
       masN = lBc%masN
       IF (lFa%nNo.EQ.0 .OR. masN.EQ.0) RETURN
 
-!     For lElas, struct: dof = 2; for ustruct: dof = 3
-      IF ((eq(cEq)%phys .EQ. phys_lElas) .OR.
-     2    (eq(cEq)%phys .EQ. phys_struct)) THEN
-         DO a=1, lFa%nNo
-            rowN = lFa%gN(a)
-            IF (rowN .EQ. masN) CYCLE
-            R (1:2,rowN) = 0._RKIND
-
-!           Diagonalize the stiffness matrix (A)
-            DO i=rowPtr(rowN), rowPtr(rowN+1)-1
-               colN = colPtr(i)
-               IF (colN .EQ. rowN) THEN
-                  Val(1,i) = 1._RKIND
-                  Val(4,i) = 1._RKIND
-               ELSE IF (colN .EQ. masN) THEN
-                  Val(1,i) = -1._RKIND
-                  Val(4,i) = -1._RKIND
-               END IF
-            END DO
-         END DO
-
-      ELSE IF (eq(cEq)%phys .EQ. phys_ustruct) THEN
+      IF (nsd .EQ. 2) THEN
          DO a=1, lFa%nNo
             rowN = lFa%gN(a)
             IF (rowN .EQ. masN) CYCLE
@@ -707,49 +686,8 @@
                END IF
             END DO
          END DO
-      END IF
 
-      RETURN
-      END SUBROUTINE SETBC_CLMPD2D
-!--------------------------------------------------------------------
-!     Set clamped BC for 3D problems
-      SUBROUTINE SETBC_CLMPD3D(lBc, lFa)
-      USE COMMOD
-      USE ALLFUN
-      IMPLICIT NONE
-      TYPE(bcType), INTENT(IN) :: lBc
-      TYPE(faceType), INTENT(IN) :: lFa
-
-      INTEGER(KIND=IKIND) a, i, masN, rowN, colN
-
-      masN = lBc%masN
-      IF (lFa%nNo.EQ.0 .OR. masN.EQ.0) RETURN
-
-!     For lElas, struct: dof = 3; for ustruct: dof = 4
-      IF ((eq(cEq)%phys .EQ. phys_lElas) .OR.
-     2    (eq(cEq)%phys .EQ. phys_shell) .OR.
-     3    (eq(cEq)%phys .EQ. phys_struct)) THEN
-         DO a=1, lFa%nNo
-            rowN = lFa%gN(a)
-            IF (rowN .EQ. masN) CYCLE
-            R (1:3,rowN) = 0._RKIND
-
-!           Diagonalize the stiffness matrix (A)
-            DO i=rowPtr(rowN), rowPtr(rowN+1)-1
-               colN = colPtr(i)
-               IF (colN .EQ. rowN) THEN
-                  Val(1,i) = 1._RKIND
-                  Val(5,i) = 1._RKIND
-                  Val(9,i) = 1._RKIND
-               ELSE IF (colN .EQ. masN) THEN
-                  Val(1,i) = -1._RKIND
-                  Val(5,i) = -1._RKIND
-                  Val(9,i) = -1._RKIND
-               END IF
-            END DO
-         END DO
-
-      ELSE IF (eq(cEq)%phys .EQ. phys_ustruct) THEN
+      ELSE IF (nsd .EQ. 3) THEN
          DO a=1, lFa%nNo
             rowN = lFa%gN(a)
             IF (rowN .EQ. masN) CYCLE
@@ -772,7 +710,7 @@
       END IF
 
       RETURN
-      END SUBROUTINE SETBC_CLMPD3D
+      END SUBROUTINE SETBCUNDEFNEUL
 !####################################################################
 !     Weak treatment of Dirichlet boundary conditions
       SUBROUTINE SETBCDIRW(Yg, Dg)
@@ -795,21 +733,23 @@
             DO i = 1, 2 
                M = RIS%lst(i,1,1)
                IF( M .EQ. iM ) THEN 
-C                   write(*,*)" looking mesh iM "
+
                   Fa = RIS%lst(i,2,1)
                   IF( (Fa .EQ. iFa ) ) 
      2                       THEN 
                      found = 1 
-C                      write(*,*)" We have find the face " 
                   END IF
                END IF
             END DO
          END IF
+
          IF( (found .EQ. 1).AND.(RIS%clsFlg.EQ.0)) THEN 
             CYCLE
          END IF 
+
          IF( found .EQ. 1) write(*,*)" We do weakly RIS BC "
-         
+
+
          CALL SETBCDIRWL(eq(cEq)%bc(iBc), msh(iM), msh(iM)%fa(iFa), Yg,
      2      Dg)
       END DO
@@ -902,8 +842,17 @@ C                      write(*,*)" We have find the face "
          Ec    = lFa%gE(e)
          cDmn  = DOMAIN(lM, cEq, Ec)
          cPhys = eq(cEq)%dmn(cDmn)%phys
-         IF (cPhys .NE. phys_fluid) err = "Weakly applied Dirichlet "//
-     2      "BC is allowed for fluid phys only"
+!         IF (cPhys .NE. phys_fluid) err = "Weakly applied Dirichlet "//
+!     2      "BC is allowed for fluid phys only"
+ 
+         IF (cPhys .NE. phys_fluid) THEN
+            IF (.NOT. risFlag) THEN
+                err = "Weakly applied Dirichlet BC is allowed for " //
+     2          "fluid phys only, skipping"
+            ELSE
+                CYCLE
+            END IF
+         END IF
 
 !        Initialize local residue and stiffness
          lR = 0._RKIND
@@ -1016,41 +965,40 @@ C                      write(*,*)" We have find the face "
       REAL(KIND=RKIND) tmp
 
       IF (cplBC%schm .EQ. cplBC_I) THEN
-         CALL CALCDERCPLBC()
-
+         CALL CALCDERCPLBC
       ELSE
+         RCRflag = .FALSE.
+
          DO iBc=1, eq(iEq)%nBc
             iFa = eq(iEq)%bc(iBc)%iFa
             iM  = eq(iEq)%bc(iBc)%iM
-!           ZH:  05/01/23 add below code to update area for LPN with 
-!           effective direction
+            ! ZH 03/27/2023: added this line to update the area
             CALL BCINI(eq(iEq)%bc(iBc), msh(iM)%fa(iFa))
-  
             ptr = eq(iEq)%bc(iBc)%cplBCptr
+
+            IF (BTEST(eq(iEq)%bc(iBc)%bType,bType_RCR)) THEN
+               IF (.NOT.RCRflag) RCRflag = .TRUE.
+            END IF
             IF (ptr .NE. 0) THEN
                IF (BTEST(eq(iEq)%bc(iBc)%bType,bType_Neu)) THEN
                   cplBC%fa(ptr)%Qo = Integ(msh(iM)%fa(iFa),Yo,1,nsd)
                   cplBC%fa(ptr)%Qn = Integ(msh(iM)%fa(iFa),Yn,1,nsd)
                   cplBC%fa(ptr)%Po = 0._RKIND
                   cplBC%fa(ptr)%Pn = 0._RKIND
+!                  IF (cm%mas()) PRINT*, "cpl bc in Neu"
                ELSE IF (BTEST(eq(iEq)%bc(iBc)%bType,bType_Dir)) THEN
                   tmp = msh(iM)%fa(iFa)%area
                   cplBC%fa(ptr)%Po = Integ(msh(iM)%fa(iFa),Yo,nsd+1)/tmp
                   cplBC%fa(ptr)%Pn = Integ(msh(iM)%fa(iFa),Yn,nsd+1)/tmp
                   cplBC%fa(ptr)%Qo = 0._RKIND
                   cplBC%fa(ptr)%Qn = 0._RKIND
+!                 IF (cm%mas()) PRINT*, "cpl bc in Dir"
                END IF
             END IF
          END DO
-
          IF (cplBC%useGenBC) THEN
             CALL genBC_Integ_X('T')
          ELSE
-            RCRflag = .FALSE.
-            IF (ANY(BTEST(eq(iEq)%bc(:)%bType,bType_RCR))) THEN
-               IF (.NOT.RCRflag) RCRflag = .TRUE.
-            END IF
-
             CALL cplBC_Integ_X(RCRflag)
          END IF
       END IF
@@ -1059,6 +1007,10 @@ C                      write(*,*)" We have find the face "
          iFa = eq(iEq)%bc(iBc)%iFa
          ptr = eq(iEq)%bc(iBc)%cplBCptr
          IF (ptr .NE. 0) eq(iEq)%bc(iBc)%g = cplBC%fa(ptr)%y
+!         IF (cm%mas() .AND. ptr .NE. 0) THEN
+!           PRINT*, "IBC IS ", iBc
+!           PRINT*, eq(iEq)%bc(iBc)%g
+!         END IF
       END DO
 
       RETURN
@@ -1079,12 +1031,16 @@ C                      write(*,*)" We have find the face "
 
       REAL(KIND=RKIND), ALLOCATABLE :: orgY(:), orgQ(:)
 
-      IF (ALL(cplBC%fa%bGrp .EQ. cplBC_Dir)) RETURN
+      IF (ALL(cplBC%fa%bGrp.EQ.cplBC_Dir)) RETURN
 
+      RCRflag = .FALSE.
       DO iBc=1, eq(iEq)%nBc
          iFa = eq(iEq)%bc(iBc)%iFa
          iM  = eq(iEq)%bc(iBc)%iM
          ptr = eq(iEq)%bc(iBc)%cplBCptr
+         IF (BTEST(eq(iEq)%bc(iBc)%bType,bType_RCR)) THEN
+            IF (.NOT.RCRflag) RCRflag = .TRUE.
+         END IF
          IF (ptr .NE. 0) THEN
             IF (BTEST(eq(iEq)%bc(iBc)%bType,bType_Neu)) THEN
                cplBC%fa(ptr)%Qo = Integ(msh(iM)%fa(iFa),Yo,1,nsd)
@@ -1104,11 +1060,6 @@ C                      write(*,*)" We have find the face "
       IF (cplBC%useGenBC) THEN
          CALL genBC_Integ_X('D')
       ELSE
-         RCRflag = .FALSE.
-         IF (ANY(BTEST(eq(iEq)%bc(:)%bType, bType_RCR))) THEN
-            RCRflag = .TRUE.
-         END IF
-
          CALL cplBC_Integ_X(RCRflag)
       END IF
 
@@ -1175,7 +1126,7 @@ C                      write(*,*)" We have find the face "
             END IF
          END DO
          fid = 1
-         OPEN(fid, FILE=TRIM(cplBC%commuName), FORM='UNFORMATTED')
+         OPEN(fid, FILE=cplBC%commuName, FORM='UNFORMATTED')
          WRITE(fid) genFlag
          WRITE(fid) dt
          WRITE(fid) nDir
@@ -1480,4 +1431,4 @@ C                      write(*,*)" We have find the face "
 
       RETURN
       END SUBROUTINE SETBCCMML
-!####################################################################
+!###############################################################

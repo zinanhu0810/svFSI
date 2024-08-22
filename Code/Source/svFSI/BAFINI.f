@@ -41,7 +41,7 @@
       USE ALLFUN
       IMPLICIT NONE
 
-      INTEGER(KIND=IKIND) iM, iFa, iEq, i, a, iBc, lsPtr
+      INTEGER(KIND=IKIND) iM, iFa, iEq, i, a, iBc, lsPtr, M,Fa,found
 
       INTEGER(KIND=IKIND), ALLOCATABLE :: gNodes(:)
 
@@ -60,14 +60,13 @@
             iFa = eq(iEq)%bc(iBc)%iFa
             iM  = eq(iEq)%bc(iBc)%iM
             CALL BCINI(eq(iEq)%bc(iBc), msh(iM)%fa(iFa))
-            IF (msh(iM)%lShl .AND. (msh(iM)%eType.EQ.eType_TRI3)) THEN
+            IF (msh(iM)%lShl) THEN
                CALL SHLBCINI(eq(iEq)%bc(iBc), msh(iM)%fa(iFa), msh(iM))
             END IF
          END DO
       END DO
 
-!     cplBC faces are initialized here. Assuming that cplBC is always
-!     in the first equation
+!     cplBC faces are initialized here
       iEq = 1
       IF (ALLOCATED(cplBC%fa)) DEALLOCATE(cplBC%fa)
       IF (ALLOCATED(cplBC%xn)) DEALLOCATE(cplBC%xn)
@@ -95,7 +94,7 @@
                   cplBC%fa(i)%RCR%Pd = eq(iEq)%bc(iBc)%RCR%Pd
                   cplBC%fa(i)%RCR%Xo = eq(iEq)%bc(iBc)%RCR%Xo
                ELSE
-                  err = " Not a compatible cplBC_type"
+                  err = "Not a compatible cplBC_type"
                END IF
             END IF
          END DO
@@ -583,7 +582,7 @@
       END SUBROUTINE FSILSINI
 !####################################################################
 !     Compute shell extended IEN for triangular elements. Reqd. to
-!     resolve bending moments.
+!     resolve bending moments
       SUBROUTINE SETSHLXIEN(lM)
       USE COMMOD
       IMPLICIT NONE
@@ -698,8 +697,7 @@
       RETURN
       END SUBROUTINE SHLINI
 !--------------------------------------------------------------------
-!     Initializing boundary condition variables for CST shells - this
-!     BC is set on the interior node adjacent to the boundary
+!     Initializing shell boundary condition variables
       SUBROUTINE SHLBCINI(lBc, lFa, lM)
       USE COMMOD
       USE ALLFUN
@@ -711,13 +709,11 @@
       INTEGER(KIND=IKIND) :: a, b, e, Ac, Bc, Ec
       LOGICAL :: bFlag
 
+      IF (lFa%eType .EQ. eType_NRB) RETURN
       DO e=1, lFa%nEl
          Ec = lFa%gE(e)
          DO a=1, lM%eNoN
             Ac = lM%IEN(a,Ec)
-
-!           Find the interior node of the mesh element that is part of
-!           the boundary. [bFlag=='T' => node is on the boundary]
             bflag = .FALSE.
             DO b=1, lFa%eNoN
                Bc = lFa%IEN(b,e)
@@ -726,13 +722,10 @@
                   EXIT
                END IF
             END DO
-
-!           Set the BC on the interior node [bFlag == 'F']
             IF (.NOT.bFlag) THEN
-               IF (.NOT.BTEST(lM%sbc(a,Ec),bType_free)) THEN
-                  err = "BC detected on a non-boundary shell element."//
-     2               " Correction needed"
-               END IF
+               IF (.NOT.BTEST(lM%sbc(a,Ec),bType_free)) err =
+     2            "BC detected on a non-boundary shell element. "//
+     3            "Correction needed"
                lM%sbc(a,Ec) = IBCLR(lM%sbc(a,Ec), bType_free)
                IF (BTEST(lBc%bType,bType_free)) THEN
                   lM%sbc(a,Ec) = IBSET(lM%sbc(a,Ec),bType_free)
