@@ -43,10 +43,11 @@
 
       LOGICAL flag
       INTEGER(KIND=IKIND) a, b, e, i, j, rowN, colN, iM, iFa, masN,
-     2   mnnzeic, mapIdx(2), jM
+     2   mnnzeic, mapIdx(2), jMRIS, iProj, rowNR
 
       INTEGER(KIND=IKIND), ALLOCATABLE :: uInd(:,:)
 
+      flag = .FALSE.
       ALLOCATE(idMap(tnNo))
       DO a=1, tnNo
          idMap(a) = a
@@ -71,25 +72,27 @@
 !              Add extra connections for cooresponding nodes in case of RIS
                IF( risFlag ) THEN 
 !                 If rowN is in the list of ris nodes   
-                  mapIdx = FINDLOC(grisMap, rowN)
-                  IF(mapIdx(1).NE.0) THEN 
-!                      print*,rowN, "RIS found ", rowN
-                      print*,nMsh
-                     DO jM=1, 2 
-!                        PRINT*, "jM is", jM 
-                        IF(jM .EQ. iM) CYCLE
-                        rowN = grisMap(jM, mapIdx(2))
+                  ! loop through all projection and find the one that
+                  ! is associated with the current mesh
+                  DO iProj=1, RIS%nbrRIS
+                     IF (RIS%lst(1,1,iProj).EQ.iM) THEN
+                        jMRIS = 2
+                     ELSE IF (RIS%lst(2,1,iProj).EQ.iM) THEN
+                        jMRIS = 1
+                     ELSE
+                        CYCLE
+                     END IF
+                     mapIdx = FINDLOC(grisMapList(iProj)%map, rowN)
+                     IF(mapIdx(1).NE.0) THEN 
+                        rowNR = grisMapList(iProj)%map(jMRIS, mapIdx(2))
+                        IF (rowNR .EQ. 0) CYCLE
 
-
-!                        PRINT*, msh(iM)%eNoN
                         DO b=1, msh(iM)%eNoN
                            colN = msh(iM)%IEN(b,e)
-!                            write(*,*)" adding node ", colN
-                           CALL ADDCOL(rowN, colN)
-!                           PRINT*,"end one"
+                           CALL ADDCOL(rowNR, colN)
                         END DO
-                     END DO
-                  END IF
+                     END IF
+                   END DO
                END IF
 
             END DO
@@ -125,7 +128,6 @@
 !     master node as a column entry in each row for all the slave nodes.
 !     This step is performed even for ghost master nodes where the idMap
 !     points to the ghost master node.
-      flag = .FALSE.
       DO i=1, nEq
          DO j=1, eq(i)%nBc
             iM  = eq(i)%bc(j)%iM

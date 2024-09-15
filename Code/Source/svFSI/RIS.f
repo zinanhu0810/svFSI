@@ -44,7 +44,7 @@
       USE ALLFUN
       IMPLICIT NONE
 
-      INTEGER(KIND=IKIND) :: iEq, nPrj, m, s, e, i, iM, iFa
+      INTEGER(KIND=IKIND) :: iEq, nPrj, m, s, e, i, iM, iFa, iProj
       REAL(KIND=RKIND) :: tmp
       REAL(KIND=RKIND), ALLOCATABLE :: tmpV(:,:)
 
@@ -55,7 +55,7 @@
       IF (ALLOCATED(tmpV)) DEALLOCATE(tmpV)
       ALLOCATE (tmpV(maxnsd,tnNo))
 
-      nPrj = 1
+      nPrj = RIS%nbrRIS
   
       m = 1
       s = eq(iEq)%s + nsd 
@@ -63,19 +63,21 @@
 
       tmpV(1:m,:) = Yn(s:e,:)
 
-      RIS%meanP = 0._RKIND
-      RIS%meanFl = 0._RKIND
-      
 !     Future loop on all the nbgProj nPrj
-      DO i = 1, 2 ! We always have two meshes 
-         iM = RIS%lst(i,1,nPrj)
-         iFa = RIS%lst(i,2,nPrj)
-
-!        ERROR. HERRE FOR ALE, recompure the area with the new displacement 
-         tmp = msh(iM)%fa(iFa)%area
-         RIS%meanP(i) = Integ(msh(iM)%fa(iFa),tmpV,1)/tmp
-         write(*,*) "loop, tmp, iM", tmp, iM, iFa, SHAPE(tmpV),
-     2     tmpV(:,1:10)
+      DO iProj = 1, nPrj
+        RIS%meanP(iProj, :) = 0._RKIND
+        RIS%meanFl(iProj) = 0._RKIND
+        DO i = 1, 2 ! We always have two meshes 
+           iM = RIS%lst(i,1,iProj)
+           iFa = RIS%lst(i,2,iProj)
+!          ERROR. HERRE FOR ALE, recompure the area with the new
+!          displacement 
+!          ^FK: But that shouldn't be a problem for pressure difference
+!          check since the area (change) above and below a RIS is the
+!          same?           
+           tmp = msh(iM)%fa(iFa)%area
+           RIS%meanP(iProj, i) = Integ(msh(iM)%fa(iFa),tmpV,1)/tmp
+        END DO
       END DO
 
 !     For the velocity 
@@ -83,17 +85,19 @@
       s = eq(iEq)%s
       e = s + m - 1
 
-      IF (ALLOCATED(tmpV)) DEALLOCATE(tmpV)
-      ALLOCATE (tmpV(maxnsd,tnNo))
-      tmpV(1:m,:) = Yn(s:e,:)
+      DO iProj = 1, nPrj
+        IF (ALLOCATED(tmpV)) DEALLOCATE(tmpV)
+        ALLOCATE (tmpV(maxnsd,tnNo))
+        tmpV(1:m,:) = Yn(s:e,:)
+        iM = RIS%lst(1,1,iProj)
+        iFa = RIS%lst(1,2,iProj)
 
-      iM = RIS%lst(1,1,nPrj)
-      iFa = RIS%lst(1,2,nPrj)
-
-      RIS%meanFl = Integ(msh(iM)%fa(iFa),tmpV,1,m)
-
-      write(*,*)" The average pressure is: ", RIS%meanP
-      write(*,*)" The average flow is: ", RIS%meanFl
+        RIS%meanFl(iProj) = Integ(msh(iM)%fa(iFa),tmpV,1,m)
+        std = "For RIS projection "//iProj
+        std = "    The average pressure is: "//RIS%meanP(iProj,
+     2      1)//", "//RIS%meanP(iProj, 2)
+        std = "    The average flow is: "//RIS%meanFl(iProj)
+      END DO
 
       IF (ALLOCATED(tmpV)) DEALLOCATE(tmpV)
 
@@ -108,40 +112,41 @@
       IMPLICIT NONE
       REAL(KIND=RKIND), INTENT(IN) :: Yg(tDof,tnNo), Dg(tDof,tnNo)
 
-      INTEGER(KIND=IKIND) :: iFa, iM, nPrj, i
+      INTEGER(KIND=IKIND) :: iFa, iM, nPrj, i, cPhys, iProj
       TYPE(bcType) :: lBc
 
 
-      IF(RIS%clsFlg.EQ.0) RETURN  
+      nPrj = RIS%nbrRIS ! for the moment 
 
-      nPrj = 1 ! for the moment 
+      DO iProj = 1, nPrj
+         IF(.NOT.RIS%clsFlg(iProj)) CYCLE
+!        Weak Dirichlet BC for fluid/FSI equations
+         lBc%weakDir = .TRUE.
+         lBc%tauB = RIS%Res(iProj)
+         lBc%bType = IBSET(lBc%bType,bType_Dir)
+         lBc%bType = IBSET(lBc%bType,bType_std)
+         lBc%bType = IBSET(lBc%bType,bType_flat)
+         ALLOCATE(lBc%eDrn(nsd))
+         lBc%eDrn = 0
+         DO i = 1, 2 ! We always have two meshes for 1 projection
+            iM = RIS%lst(i,1,iProj)
+            iFa = RIS%lst(i,2,iProj)
+            ALLOCATE(lBc%gx(msh(iM)%fa(iFa)%nNo))
+            lBc%gx = 1._RKIND
 
-!     Weak Dirichlet BC for fluid/FSI equations
-      lBc%weakDir = .TRUE.
-      lBc%tauB = RIS%Res
-      lBc%bType = IBSET(lBc%bType,bType_Dir)
-      lBc%bType = IBSET(lBc%bType,bType_std)
-      lBc%bType = IBSET(lBc%bType,bType_flat)
+            cPhys = eq(cEq)%dmn(cDmn)%phys
+            IF (cPhys .EQ. phys_fluid) THEN
+!               TO build the correct bc 
+!               CALL SETBCRIS(lBc, msh(iM), msh(iM)%fa(iFa), Yg, Dg)
+               CALL SETBCDIRWL(lBc, msh(iM), msh(iM)%fa(iFa), Yg, Dg)
+            END IF
 
-      ALLOCATE(lBc%eDrn(nsd))
-      lBc%eDrn = 0
+            DEALLOCATE(lBc%gx)
 
-      DO i = 1, 2 ! We always have two meshes 
-         iM = RIS%lst(i,1,nPrj)
-         iFa = RIS%lst(i,2,nPrj)
-
-         ALLOCATE(lBc%gx(msh(iM)%fa(iFa)%nNo))
-         lBc%gx = 1._RKIND
-
-!        TO build the correct bc 
-!         CALL SETBCRIS(lBc, msh(iM), msh(iM)%fa(iFa), Yg, Dg)
-         CALL SETBCDIRWL(lBc, msh(iM), msh(iM)%fa(iFa), Yg, Dg)
-
-         DEALLOCATE(lBc%gx)
+         END DO
+         DEALLOCATE(lBc%eDrn)
 
       END DO
-
-      DEALLOCATE(lBc%eDrn)
 
       RETURN
       END SUBROUTINE RIS_RESBC
@@ -349,28 +354,37 @@
       USE COMMOD
       IMPLICIT NONE
 
-      RIS%nbrIter = RIS%nbrIter + 1
-      IF( RIS%nbrIter .LE. 130 ) RETURN
+      INTEGER(KIND=IKIND) :: iProj
 
-!     The valve is closed check if it should open
-      IF (RIS%clsFlg .EQ. 1) THEN 
-!       OPENING CONDITION: Check condition on the pressure difference        
-         IF( RIS%meanP(1) .GT. RIS%meanP(2)  ) THEN 
-            RIS%clsFlg = 0
-            write(*,*)" Going from close to open "
-            RIS%nbrIter = 0 
+      DO iProj = 1, RIS%nbrRIS
+         !IF((RIS%nbrIter(iProj).LE.1) .AND. (RIS%status(iProj))) CYCLE
 
-!            CALL restore equal velocity at the interface - mean vel at the node 
-         END iF
-      ELSE 
-!     The valve is open, check if it should close. 
-!        CLOSING CONDITION: Check existence of a backflow
-         IF( RIS%meanFl .LT. 0.) THEN 
-            RIS%clsFlg = 1
-            write(*,*)" Going from open to close "
-            RIS%nbrIter = 0 
+!        The valve is closed check if it should open
+         IF (RIS%clsFlg(iProj)) THEN 
+!          OPENING CONDITION: Check condition on the pressure difference        
+            IF( RIS%meanP(iProj, 1) .GT. RIS%meanP(iProj, 2)  ) THEN 
+               RIS%clsFlg(iProj) = .FALSE.
+               std="RIS Proj "//iProj//": Going from close to open."
+               RIS%nbrIter(iProj) = 0 
+               ! I needed to update the state variables when the valve 
+               ! goes from close to open to prevent the valve goes back
+               ! to close at the next iteration. This is needed only for
+               ! close to open and cannot be used for open to close.
+               Ao = An
+               Yo = Yn
+               IF (dFlag) Do = Dn
+               cplBC%xo = cplBC%xn
+            END iF
+         ELSE 
+!        The valve is open, check if it should close. 
+!           CLOSING CONDITION: Check existence of a backflow
+            IF( RIS%meanFl(iProj) .LT. 0.) THEN 
+               RIS%clsFlg(iProj) = .TRUE.
+               std="RIS Proj "//iProj//": Going from open to close "
+               RIS%nbrIter(iProj) = 0 
+            END IF
          END IF
-      END IF
+      END DO
 
       RETURN
       END SUBROUTINE RIS_UPDATER
@@ -382,26 +396,33 @@
       USE TYPEMOD
       USE COMMOD
       IMPLICIT NONE
+      INTEGER(KIND=IKIND) :: iProj
 
-      RIS%status = .TRUE.
-!     If the valve is closed, chech the pressure difference, 
-!     if the pressure difference is negative the valve should be open
-!     -> the status is then not admissible
-      IF (RIS%clsFlg .EQ. 1) THEN 
-         IF( RIS%meanP(1) .GT. RIS%meanP(2)  ) THEN 
-            write(*,*)" **** Not admissible, it should be open **** "
-            RIS%status = .FALSE.
-         END iF
-      ELSE 
+      DO iProj = 1, RIS%nbrRIS
+         RIS%nbrIter(iProj) = RIS%nbrIter(iProj) + 1
+         RIS%status(iProj) = .TRUE.
+!        If the valve is closed, chech the pressure difference, 
+!        if the pressure difference is negative the valve should be open
+!        -> the status is then not admissible
+         IF (RIS%clsFlg(iProj)) THEN 
+            IF( RIS%meanP(iProj,1) .GT. RIS%meanP(iProj,2)  ) THEN 
+               std= "RIS Proj "//iProj//": **** Not admissible, 
+     2              it should be open **** "
+               RIS%status(iProj) = .FALSE.
+            END iF
+         ELSE 
 
-!     If the valve is open, chech the flow, 
-!     if the flow is negative the valve should be closed
-!     -> the status is then not admissible
-         IF( RIS%meanFl .LT. 0.) THEN 
-            write(*,*)" **** Not admissible, it should be closed **** "
-            RIS%status = .FALSE.
+!        If the valve is open, chech the flow, 
+!        if the flow is negative the valve should be closed
+!        -> the status is then not admissible
+            IF( RIS%meanFl(iProj) .LT. 0.) THEN 
+               std = "RIS Proj "//iProj//": **** Not admissible, 
+     2              it should be closed **** "
+               RIS%status(iProj) = .FALSE.
+            END IF
          END IF
-      END IF
+      END DO
+
 
       RETURN
       END SUBROUTINE RIS_STATUS
@@ -413,69 +434,84 @@
 !     global stiffness matrix (Val sparse matrix formatted as a vector)
       SUBROUTINE DOASSEM_RIS (d, eqN, lK, lR)
       USE TYPEMOD
-      USE COMMOD, ONLY: dof, rowPtr, colPtr, R, Val, nMsh, nsd, grisMap
+      USE COMMOD, ONLY: dof, rowPtr, colPtr, R, Val, nMsh, nsd,
+     2  grisMapList, cm, RIS
       IMPLICIT NONE
+
       INTEGER(KIND=IKIND), INTENT(IN) :: d, eqN(d)
       REAL(KIND=RKIND), INTENT(IN) :: lK(dof*dof,d,d), lR(dof,d)
 
-      INTEGER(KIND=IKIND) a, b, ptr, rowN, colN, left, right, mapIdx(2), 
-     2                    jM, rowNadj, mapIdxC(2)
+      INTEGER(KIND=IKIND) a, b, ptr, rowN, colN, left, right, mapIdx(2),
+     2                    jM, mapIdxC(2), iProj
+      INTEGER(KIND=IKIND) :: rowNadj=0
+     
+      !IF(.NOT.cm%mas()) RETURN
+      DO iProj=1, RIS%nbrRIS
+         IF(RIS%clsFlg(iProj)) CYCLE
+         DO a=1, d
 
-      DO a=1, d
-
-         rowN = eqN(a)
-         IF (rowN .EQ. 0) CYCLE
-         mapIdx = FINDLOC(grisMap, rowN)
-         
-         IF(mapIdx(1).EQ.0) CYCLE 
-
-         DO jM=1, nMsh  
+            rowN = eqN(a)
+            IF (rowN .EQ. 0) CYCLE
+            mapIdx = FINDLOC(grisMapList(iProj)%map, rowN)
             
-            IF(jM .EQ. mapIdx(1)) CYCLE
-            IF(grisMap(jM, mapIdx(2)) .EQ. 0) CYCLE
-            
-            rowNadj = grisMap(jM, mapIdx(2))
-         END DO
+            IF(mapIdx(1).EQ.0) CYCLE 
 
-C          R(1:nsd,rowNadj) = R(1:nsd,rowNadj) + lR(1:nsd,a)
-         R(:,rowNadj) = R(:,rowNadj) + lR(:,a)
+            DO jM=1, 2
+               IF(jM .EQ. mapIdx(1)) CYCLE
+               IF(grisMapList(iProj)%map(jM, mapIdx(2)) .EQ. 0) CYCLE
+               
+               rowNadj = grisMapList(iProj)%map(jM, mapIdx(2))
 
-         DO b=1, d
-            colN = eqN(b)
-
-!           If colN is also a ris node, we have to connect the cooresponding 
-!           rowN node woth the corresponding colN node
-            mapIdxC = FINDLOC(grisMap, colN)
-
-            IF(mapIdxC(1).NE.0) THEN 
-               DO jM=1, nMsh  
-                  IF(jM .EQ. mapIdxC(1)) CYCLE
-                  IF(grisMap(jM, mapIdxC(2)) .EQ. 0) CYCLE
-                  
-                  colN = grisMap(jM, mapIdxC(2))
-               END DO
-            END IF
-
-            IF (colN .EQ. 0) CYCLE
-            left  = rowPtr(rowNadj)
-            right = rowPtr(rowNadj+1)
-            ptr   = (right + left)/2
-            DO WHILE (colN .NE. colPtr(ptr))
-               IF (colN .GT. colPtr(ptr)) THEN
-                  left  = ptr
-               ELSE
-                  right = ptr
-               END IF
-               ptr = (right + left)/2
             END DO
-            
-            Val(:,ptr) = Val(:,ptr) + lK(:,a,b)
+C             R(1:nsd,rowNadj) = R(1:nsd,rowNadj) + lR(1:nsd,a)
+            IF (rowNadj .EQ. 0) CYCLE
+            R(:,rowNadj) = R(:,rowNadj) + lR(:,a)
 
-C             Val(1:nsd*2+2,ptr) = Val(1:nsd*2+2,ptr) + lK(1:nsd*2+2,a,b)
+            DO b=1, d
+               colN = eqN(b)
 
-C             Val(1:nsd,ptr) = Val(1:nsd,ptr) + lK(1:nsd,a,b)
-C             Val(nsd+2:2*nsd+2,ptr) = Val(nsd+2:2*nsd+2,ptr) +
-C      2                                         lK(nsd+2:2*nsd+2,a,b)
+!              If colN is also a ris node, we have to connect the
+!              cooresponding 
+!              rowN node with the corresponding colN node. 
+               mapIdxC = FINDLOC(grisMapList(iProj)%map, colN)
+
+               IF(mapIdxC(1).NE.0) THEN 
+                  DO jM=1, 2
+                     IF(jM .EQ. mapIdxC(1)) CYCLE
+                     IF(grisMapList(iProj)%map(jM,mapIdxC(2)).EQ.0) THEN
+                        CYCLE
+                     END IF
+                     
+                     colN = grisMapList(iProj)%map(jM, mapIdxC(2))
+                  END DO
+!               ELSE
+!                   CYCLE
+               END IF
+
+               IF (colN .EQ. 0) CYCLE
+               left  = rowPtr(rowNadj)
+               right = rowPtr(rowNadj+1)
+               ptr   = (right + left)/2
+
+               DO WHILE (colN.NE.colPtr(ptr))
+                  IF (colN .GT. colPtr(ptr)) THEN
+                     left  = ptr
+                  ELSE
+                     right = ptr
+                  END IF
+                  ptr = (right + left)/2
+               END DO
+             
+               Val(:,ptr) = Val(:,ptr) + lK(:,a,b)
+
+C                Val(1:nsd*2+2,ptr) = Val(1:nsd*2+2,ptr) +
+C                lK(1:nsd*2+2,a,b)
+
+C                Val(1:nsd,ptr) = Val(1:nsd,ptr) + lK(1:nsd,a,b)
+C                Val(nsd+2:2*nsd+2,ptr) = Val(nsd+2:2*nsd+2,ptr) +
+C      2
+C      lK(nsd+2:2*nsd+2,a,b)
+            END DO
          END DO
       END DO
 
@@ -486,69 +522,78 @@ C      2                                         lK(nsd+2:2*nsd+2,a,b)
 !     global stiffness matrix (Val sparse matrix formatted as a vector)
       SUBROUTINE DOASSEM_VELRIS (d, eqN, lK, lR)
       USE TYPEMOD
-      USE COMMOD, ONLY: dof, rowPtr, colPtr, R, Val, nMsh, nsd, grisMap
+      USE COMMOD, ONLY: dof, rowPtr, colPtr, R, Val, nMsh, nsd,
+     2      grisMapList, RIS
       IMPLICIT NONE
+
       INTEGER(KIND=IKIND), INTENT(IN) :: d, eqN(d)
       REAL(KIND=RKIND), INTENT(IN) :: lK(dof*dof,d,d), lR(dof,d)
 
       INTEGER(KIND=IKIND) a, b, ptr, rowN, colN, left, right, mapIdx(2), 
-     2                    jM, rowNadj, mapIdxC(2)
+     2                    jM, rowNadj, mapIdxC(2), iProj
+      DO iProj=1, RIS%nbrRIS
+         IF(RIS%clsFlg(iProj)) CYCLE
+         DO a=1, d
 
-      DO a=1, d
-
-         rowN = eqN(a)
-         IF (rowN .EQ. 0) CYCLE
-         mapIdx = FINDLOC(grisMap, rowN)
-         
-         IF(mapIdx(1).EQ.0) CYCLE 
-
-         DO jM=1, nMsh  
+            rowN = eqN(a)
+            IF (rowN .EQ. 0) CYCLE
+            mapIdx = FINDLOC(grisMapList(iProj)%map, rowN)
             
-            IF(jM .EQ. mapIdx(1)) CYCLE
-            IF(grisMap(jM, mapIdx(2)) .EQ. 0) CYCLE
-            
-            rowNadj = grisMap(jM, mapIdx(2))
-         END DO
+            IF(mapIdx(1).EQ.0) CYCLE 
 
-         R(1:nsd,rowNadj) = R(1:nsd,rowNadj) + lR(1:nsd,a)
-C          R(:,rowNadj) = R(:,rowNadj) + lR(:,a)
-
-         DO b=1, d
-            colN = eqN(b)
-
-!           If colN is also a ris node, we have to connect the cooresponding 
-!           rowN node woth the corresponding colN node
-            mapIdxC = FINDLOC(grisMap, colN)
-
-            IF(mapIdxC(1).NE.0) THEN 
-               DO jM=1, nMsh  
-                  IF(jM .EQ. mapIdxC(1)) CYCLE
-                  IF(grisMap(jM, mapIdxC(2)) .EQ. 0) CYCLE
-                  
-                  colN = grisMap(jM, mapIdxC(2))
-               END DO
-            END IF
-
-            IF (colN .EQ. 0) CYCLE
-            left  = rowPtr(rowNadj)
-            right = rowPtr(rowNadj+1)
-            ptr   = (right + left)/2
-            DO WHILE (colN .NE. colPtr(ptr))
-               IF (colN .GT. colPtr(ptr)) THEN
-                  left  = ptr
-               ELSE
-                  right = ptr
-               END IF
-               ptr = (right + left)/2
+            DO jM=1, 2
+               
+               IF(jM .EQ. mapIdx(1)) CYCLE
+               IF(grisMapList(iProj)%map(jM, mapIdx(2)) .EQ. 0) CYCLE
+               
+               rowNadj = grisMapList(iProj)%map(jM, mapIdx(2))
             END DO
-            
-C             Val(:,ptr) = Val(:,ptr) + lK(:,a,b)
 
-            Val(1:nsd*2+2,ptr) = Val(1:nsd*2+2,ptr) + lK(1:nsd*2+2,a,b)
+            R(1:nsd,rowNadj) = R(1:nsd,rowNadj) + lR(1:nsd,a)
+C             R(:,rowNadj) = R(:,rowNadj) + lR(:,a)
 
-C             Val(1:nsd,ptr) = Val(1:nsd,ptr) + lK(1:nsd,a,b)
-C             Val(nsd+2:2*nsd+2,ptr) = Val(nsd+2:2*nsd+2,ptr) +
-C      2                                         lK(nsd+2:2*nsd+2,a,b)
+            DO b=1, d
+               colN = eqN(b)
+
+!              If colN is also a ris node, we have to connect the
+!              cooresponding 
+!              rowN node woth the corresponding colN node
+               mapIdxC = FINDLOC(grisMapList(iProj)%map, colN)
+
+               IF(mapIdxC(1).NE.0) THEN 
+                  DO jM=1, 2
+                     IF(jM .EQ. mapIdxC(1)) CYCLE
+                     IF(grisMapList(iProj)%map(jM,mapIdxC(2)).EQ.0) THEN
+                        CYCLE
+                     END IF
+                     
+                     colN = grisMapList(iProj)%map(jM, mapIdxC(2))
+                  END DO
+               END IF
+
+               IF (colN .EQ. 0) CYCLE
+               left  = rowPtr(rowNadj)
+               right = rowPtr(rowNadj+1)
+               ptr   = (right + left)/2
+               DO WHILE (colN .NE. colPtr(ptr))
+                  IF (colN .GT. colPtr(ptr)) THEN
+                     left  = ptr
+                  ELSE
+                     right = ptr
+                  END IF
+                  ptr = (right + left)/2
+               END DO
+               
+C                Val(:,ptr) = Val(:,ptr) + lK(:,a,b)
+
+               Val(1:nsd*2+2,ptr) = Val(1:nsd*2+2,ptr) + 
+     2              lK(1:nsd*2+2,a,b)
+
+C                Val(1:nsd,ptr) = Val(1:nsd,ptr) + lK(1:nsd,a,b)
+C                Val(nsd+2:2*nsd+2,ptr) = Val(nsd+2:2*nsd+2,ptr) +
+C         2
+C         lK(nsd+2:2*nsd+2,a,b)
+            END DO
          END DO
       END DO
 
@@ -562,15 +607,17 @@ C      2                                         lK(nsd+2:2*nsd+2,a,b)
       USE COMMOD
       IMPLICIT NONE
 
-      INTEGER(KIND=IKIND) iM, j, Ac, nStk 
+      INTEGER(KIND=IKIND) iM, j, Ac, nStk, iProj
 
-      nStk = SIZE(grisMap,2)
+      DO iProj=1, RIS%nbrRIS
+         nStk = SIZE(grisMapList(iProj)%map,2)
 
-      DO iM=1, nMsh  
-         DO j=1, nStk
-            Ac = grisMap(iM,j)
-            IF(Ac .EQ. 0) CYCLE
-            R(1:nsd,Ac) = 0._RKIND
+         DO iM=1, 2
+            DO j=1, nStk
+               Ac = grisMapList(iProj)%map(iM,j)
+               IF(Ac .EQ. 0) CYCLE
+               R(1:nsd,Ac) = 0._RKIND
+            END DO
          END DO
       END DO
 
@@ -583,17 +630,19 @@ C      2                                         lK(nsd+2:2*nsd+2,a,b)
       IMPLICIT NONE
       REAL(KIND=RKIND), INTENT(INOUT) :: lA(tDof, tnNo), lY(tDof, tnNo),
      2   lD(tDof, tnNo)
+      
+      INTEGER(KIND=IKIND) iM, j, Ac, nStk, iProj
 
-      INTEGER(KIND=IKIND) iM, j, Ac, nStk 
+      DO iProj=1, RIS%nbrRIS
+         nStk = SIZE(grisMapList(iProj)%map,2)
 
-      nStk = SIZE(grisMap,2)
-
-      DO iM=1, nMsh  
-         DO j=1, nStk
-            Ac = grisMap(iM,j)
-            IF(Ac .EQ. 0) CYCLE
-            lA(1:nsd,Ac) = 0._RKIND
-            lY(1:nsd,Ac) = 0._RKIND
+         DO iM=1, 2 
+            DO j=1, nStk
+               Ac = grisMapList(iProj)%map(iM,j)
+               IF(Ac .EQ. 0) CYCLE
+               lA(1:nsd,Ac) = 0._RKIND
+               lY(1:nsd,Ac) = 0._RKIND
+            END DO
          END DO
       END DO
 
@@ -738,7 +787,7 @@ C      2                                         lK(nsd+2:2*nsd+2,a,b)
                   CALL cm%bcast(eq(cEq)%bc(iBc)%clsFlgRis) 
                END IF
                IF (cm%mas()) THEN
-                   write(*,*)"!!! -- Going from close to open "
+                   std = "!!! -- Going from close to open "
                END IF
                RisnbrIter = 0 
 
@@ -753,7 +802,7 @@ C      2                                         lK(nsd+2:2*nsd+2,a,b)
                   CALL cm%bcast(eq(cEq)%bc(iBc)%clsFlgRis) 
                END IF
                IF (cm%mas()) THEN
-                   write(*,*)"!!! -- Going from open to close "
+                   std = "!!! -- Going from open to close "
                END IF
                RisnbrIter = 0 
             END IF
@@ -771,7 +820,7 @@ C      2                                         lK(nsd+2:2*nsd+2,a,b)
          IF (eq(cEq)%bc(iBc)%clsFlgRis .EQ. 1) THEN 
             IF( eq(cEq)%bc(iBc)%g .LT. meanP  ) THEN 
                IF (cm%mas()) THEN
-                   write(*,*)"** Not admissible, should be open **"
+                   std = "** Not admissible, should be open **"
                END IF
                ! status = .FALSE.
             END IF
