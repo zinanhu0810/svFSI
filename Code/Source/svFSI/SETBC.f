@@ -720,7 +720,7 @@
       REAL(KIND=RKIND), INTENT(IN) :: Yg(tDof,tnNo), Dg(tDof,tnNo)
 
       INTEGER(KIND=IKIND) :: iBc, iFa, iM
-      INTEGER(KIND=IKIND) :: i, j, M, Fa, found, projFound,iProj
+      INTEGER(KIND=IKIND) :: i, j, M, Fa, found
 
       DO iBc=1, eq(cEq)%nBc
          iM  = eq(cEq)%bc(iBc)%iM
@@ -728,36 +728,30 @@
          IF (.NOT.eq(cEq)%bc(iBc)%weakDir) CYCLE
 
 !        IF we are in ris and the valve isn't close, cycle 
-         DO iProj = 1, RIS%nbrRIS
+         IF( risFlag ) THEN 
             found = 0
-            projFound = 0
-            IF( risFlag ) THEN 
-               DO i = 1, 2 
-                  M = RIS%lst(i,1,iProj)
-                  IF( M .EQ. iM ) THEN 
+            DO i = 1, 2 
+               M = RIS%lst(i,1,1)
+               IF( M .EQ. iM ) THEN 
 
-                     Fa = RIS%lst(i,2,iProj)
-                     IF( (Fa .EQ. iFa ) ) 
-     2                          THEN 
-!                       The face of this mesh should be associated with
-!                       only one RIS projection.                     
-                        found = 1 
-                        projFound = iProj
-                     END IF
+                  Fa = RIS%lst(i,2,1)
+                  IF( (Fa .EQ. iFa ) ) 
+     2                       THEN 
+                     found = 1 
                   END IF
-               END DO
-            END IF
-            IF( (found .EQ. 1).AND.(.NOT.RIS%clsFlg(projFound))) THEN 
-               CYCLE
-            END IF 
+               END IF
+            END DO
+         END IF
 
-            IF( found .EQ. 1) write(*,*)"We do weakly RIS BC for 
-     2          RIS Proj", iProj
+         IF( (found .EQ. 1).AND.(RIS%clsFlg.EQ.0)) THEN 
+            CYCLE
+         END IF 
 
-            CALL SETBCDIRWL(eq(cEq)%bc(iBc), msh(iM), msh(iM)%fa(iFa), 
-     2          Yg, Dg)
-         END DO
+         IF( found .EQ. 1) write(*,*)" We do weakly RIS BC "
 
+
+         CALL SETBCDIRWL(eq(cEq)%bc(iBc), msh(iM), msh(iM)%fa(iFa), Yg,
+     2      Dg)
       END DO
 
       RETURN

@@ -42,8 +42,7 @@
       IMPLICIT NONE
 
       LOGICAL l1, l2, l3
-      INTEGER(KIND=IKIND) i, iM, iBc, ierr, iEqOld, stopTS, j,
-     2      iProj
+      INTEGER(KIND=IKIND) i, iM, iBc, ierr, iEqOld, stopTS, j
       REAL(KIND=RKIND) timeP(3)
 
       INTEGER(KIND=IKIND), ALLOCATABLE :: incL(:)
@@ -283,25 +282,17 @@
 ! ---- Here we probably have to update the ris resistance value
 ! ---- If the state has to change, we recompute this time step GOTO 1
 ! ---- Control where if the time and the new has changed!
-         IF (risFlag ) THEN 
+         write(*,*) "CHECK RIS: ", cEq, risFlag 
+         IF ((cEq .GE. 1) .AND. risFlag ) THEN 
             CALL RIS_MEANQ
-            CALL RIS_STATUS
+            CALL RIS_UPDATER
 
-            std = " Iteration: "//cTS
-            DO iProj=1, RIS%nbrRIS
-                std = "Status for RIS projection: "//iProj
-                std = "  RIS iteration: "//RIS%nbrIter(iProj)
-                std = "  Is the valve close? "//RIS%clsFlg(iProj)
-                std = "  The status is "//RIS%status(iProj)
-            END DO
-            IF((.NOT.ALL(RIS%status)))THEN 
-                IF (ANY(RIS%nbrIter.LE.1)) THEN
-                    std = "Valve status just changed. Do not update"
-                ELSE
-                    CALL RIS_UPDATER
-                END IF
-                GOTO 11
-            END IF
+            write(*,*)" Iteration : " , cTS
+            write(*,*)" Is the valve close? ", RIS%clsFlg
+            CALL RIS_STATUS
+            write(*,*)" The status is ", RIS%status
+            IF( RIS%nbrIter .LE. 6) GOTO 11
+!             IF( RIS%nbrIter .EQ. 0) GOTO 11
 
          END IF
 

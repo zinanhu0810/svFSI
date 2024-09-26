@@ -166,9 +166,6 @@
      2               "combination. Cannot write restart files"
                   WRITE(fid, REC=myID) stamp, cTS, time,CPUT()-timeP(1),
      2               eq%iNorm, cplBC%xn, Yn, An, Dn, Ad, Xion, cem%Ya
-               ELSE IF (risFlag) THEN
-                  WRITE(fid, REC=myID) stamp, cTS, time,CPUT()-timeP(1),
-     2               eq%iNorm, cplBC%xn, Yn, An, Dn, Ad, RIS%clsFlg
                ELSE
                   WRITE(fid, REC=myID) stamp, cTS, time,CPUT()-timeP(1),
      2               eq%iNorm, cplBC%xn, Yn, An, Dn, Ad
@@ -184,9 +181,6 @@
      2               "combination. Cannot write restart files"
                   WRITE(fid, REC=myID) stamp, cTS, time,CPUT()-timeP(1),
      2               eq%iNorm, cplBC%xn, Yn, An, Dn, Xion, cem%Ya
-               ELSE IF (risFlag) THEN
-                  WRITE(fid, REC=myID) stamp, cTS, time,CPUT()-timeP(1),
-     2               eq%iNorm, cplBC%xn, Yn, An, Dn, RIS%clsFlg
                ELSE
                   WRITE(fid, REC=myID) stamp, cTS, time,CPUT()-timeP(1),
      2               eq%iNorm, cplBC%xn, Yn, An, Dn
@@ -197,9 +191,6 @@
             IF (cepEq) THEN
                WRITE(fid, REC=myID) stamp, cTS, time, CPUT()-timeP(1),
      2            eq%iNorm, cplBC%xn, Yn, An, Xion
-            ELSE IF (risFlag) THEN
-               WRITE(fid, REC=myID) stamp, cTS, time,CPUT()-timeP(1),
-     2            eq%iNorm, cplBC%xn, Yn, An, RIS%clsFlg
             ELSE
                WRITE(fid, REC=myID) stamp, cTS, time, CPUT()-timeP(1),
      2            eq%iNorm, cplBC%xn, Yn, An

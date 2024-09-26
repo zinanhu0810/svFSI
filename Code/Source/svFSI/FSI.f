@@ -285,10 +285,8 @@ C                     write(*,*)" DDir = ", DDir
                CALL USTRUCT_DOASSEM(eNoN, ptr, lKd, lK, lR)
             ELSE
                CALL DOASSEM(eNoN, ptr, lK, lR)
-               IF( risFlag) THEN 
-                   IF (.NOT. ALL(RIS%clsFlg)) THEN
-                      CALL DOASSEM_RIS(eNoN, ptr, lK, lR)
-                   END IF
+               IF( risFlag .AND. (RIS%clsFlg.EQ.0)) THEN 
+                   CALL DOASSEM_RIS(eNoN, ptr, lK, lR)
                END IF
             END IF
 #ifdef WITH_TRILINOS

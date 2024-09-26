@@ -610,10 +610,6 @@
          TYPE(faceType), ALLOCATABLE :: fa(:)
 !        IB: tracers
          TYPE(traceType) :: trc
-!        RIS: flags of whether elemets are adjacent to RIS projections
-         LOGICAL, ALLOCATABLE :: eRIS(:)
-!        RIS: processor ids to change element partitions to
-         INTEGER(KIND=IKIND), ALLOCATABLE :: partRIS(:)
       END TYPE mshType
 
 !     Equation type
@@ -836,20 +832,20 @@
 !        Number of RIS surface 
          INTEGER(KIND=IKIND) :: nbrRIS = 0
 !        Count time steps where no check is needed         
-         INTEGER(KIND=IKIND), ALLOCATABLE :: nbrIter(:)
+         INTEGER(KIND=IKIND) :: nbrIter = 100
 !        List of meshes, and faces connected. The first face is the 
 !        proximal pressure's face, while the second is the distal one
          INTEGER(KIND=IKIND), ALLOCATABLE :: lst(:,:,:)
 !        Resistance value 
-         REAL(KIND=RKIND), ALLOCATABLE :: Res(:)
+         REAL(KIND=RKIND) :: Res = 0._RKIND
 !        Flag closed surface active, the valve is considerd open initially 
-         LOGICAL, ALLOCATABLE :: clsFlg(:)
+         INTEGER(KIND=IKIND) :: clsFlg = 0
 !        Mean distal and proximal pressure (1: distal, 2: proximal)
-         REAL(KIND=RKIND), ALLOCATABLE :: meanP(:, :)
+         REAL(KIND=RKIND) :: meanP(2) = 0._RKIND
 !        Mean flux on the RIS surface 
-         REAL(KIND=RKIND), ALLOCATABLE :: meanFl(:)
+         REAL(KIND=RKIND) :: meanFl = 0._RKIND
 !        Status RIS interface 
-         LOGICAL, ALLOCATABLE :: status(:)
+         LOGICAL :: status = .TRUE.     
       END TYPE risFace
 
 !     Unfitted Resistive Immersed surface data type
@@ -1023,15 +1019,10 @@ C          TYPE(ibCommType) :: cm
 !     IB: iblank used for immersed boundaries (1 => solid, 0 => fluid)
       INTEGER, ALLOCATABLE :: iblank(:)
 
-!     TO-DO: for now, better to organize these within a class      
-      TYPE :: Array2D
-        INTEGER, ALLOCATABLE :: map(:,:)
-      END TYPE Array2D
-
 !     RIS mapping array, with local (mesh) enumeration
-      TYPE(Array2D), ALLOCATABLE :: risMapList(:)
+      INTEGER, ALLOCATABLE :: risMap(:,:)
 !     RIS mapping array, with global (total) enumeration
-      TYPE(Array2D), ALLOCATABLE :: grisMapList(:)
+      INTEGER, ALLOCATABLE :: grisMap(:,:)
     
 
 !     Old time derivative of variables (acceleration)

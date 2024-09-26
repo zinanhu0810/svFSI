@@ -42,8 +42,7 @@
       REAL(KIND=RKIND), INTENT(OUT) :: timeP(3)
 
       LOGICAL :: flag
-      INTEGER(KIND=IKIND) :: i,j, a, iEq, iDmn, iM, iFa, ierr, nnz,
-     2          gnnz, iProj
+      INTEGER(KIND=IKIND) :: i,j, a, iEq, iDmn, iM, iFa, ierr, nnz, gnnz
       CHARACTER(LEN=stdL) :: fTmp, sTmp
       REAL(KIND=RKIND) :: am
       TYPE(FSILS_commuType) :: communicator
@@ -159,7 +158,6 @@
          i = i + nXion
          IF (cem%cpld) i = i + 1
       END IF
-      IF (risFlag) i = i + RIS%nbrRIS
       i = IKIND*(1+SIZE(stamp)) + RKIND*(2+nEq+cplBC%nX+i*tnNo)
 
       IF (ibFlag) i = i + RKIND*(3*nsd+1)*ib%tnNo
@@ -186,12 +184,18 @@
 
       IF(risFlag) THEN 
 !        Building the global risMap with total nodes enumeration
-         DO iProj=1, RIS%nbrRIS
-            print*,"-p ", cm%id(), "-pj", iProj, "RIS node: ",
-     2          grisMapList(iProj)%map(1,:)
-            print*,"-p ", cm%id(), "-pj", iProj, "RIS node: ",
-     2          grisMapList(iProj)%map(2,:)
-         END DO
+         DO i = 1, nMsh
+            print*, " mesh ", i
+            DO j = 1, SIZE(risMap,2)
+               IF( risMap(i,j) .NE. 0) THEN 
+                  grisMap(i,j) = msh(i)%gN(risMap(i,j))
+               END IF
+            END DO
+         END DO  
+
+         print*, " Finally the gmap is: "
+         print*, grisMap(1,:) 
+         print*, grisMap(2,:) 
 
       END IF  
 
@@ -543,10 +547,6 @@
      2               "combination. Cannot load restart files"
                   READ(fid,REC=cm%tF()) tStamp, cTS, time, timeP(1),
      2               eq%iNorm, cplBC%xo, Yo, Ao, Do, Ad, Xion, cem%Ya
-               ELSE IF (risFlag) THEN
-                  READ(fid,REC=cm%tF()) tStamp, cTS, time, timeP(1),
-     2               eq%iNorm, cplBC%xo, Yo, Ao, Do, Ad, RIS%clsFlg
-
                ELSE
                   READ(fid,REC=cm%tF()) tStamp, cTS, time, timeP(1),
      2               eq%iNorm, cplBC%xo, Yo, Ao, Do, Ad
@@ -560,9 +560,6 @@
      2               "combination. Cannot load restart files"
                   READ(fid,REC=cm%tF()) tStamp, cTS, time, timeP(1),
      2               eq%iNorm, cplBC%xo, Yo, Ao, Do, Xion, cem%Ya
-               ELSE IF (risFlag) THEN
-                  READ(fid,REC=cm%tF()) tStamp, cTS, time, timeP(1),
-     2               eq%iNorm, cplBC%xo, Yo, Ao, Do, RIS%clsFlg
                ELSE
                   READ(fid,REC=cm%tF()) tStamp, cTS, time, timeP(1),
      2               eq%iNorm, cplBC%xo, Yo, Ao, Do
@@ -572,9 +569,6 @@
             IF (cepEq) THEN
                READ(fid,REC=cm%tF()) tStamp, cTS, time, timeP(1),
      2          eq%iNorm, cplBC%xo, Yo, Ao, Xion
-            ELSE IF (risFlag) THEN
-               READ(fid,REC=cm%tF()) tStamp, cTS, time, timeP(1),
-     2            eq%iNorm, cplBC%xo, Yo, Ao, RIS%clsFlg
             ELSE
                READ(fid,REC=cm%tF()) tStamp, cTS, time, timeP(1),
      2            eq%iNorm, cplBC%xo, Yo, Ao
@@ -640,7 +634,7 @@
       USE ALLFUN
       IMPLICIT NONE
 
-      INTEGER(KIND=IKIND) iM, iEq, iProj
+      INTEGER(KIND=IKIND) iM, iEq
 
 !     Deallocating meshes
       IF (ALLOCATED(msh)) THEN
@@ -680,6 +674,9 @@
       IF (ALLOCATED(idMap))    DEALLOCATE(idMap)
       IF (ALLOCATED(cmmBdry))  DEALLOCATE(cmmBdry)
       IF (ALLOCATED(iblank))   DEALLOCATE(iblank)
+
+      IF (ALLOCATED(risMap))   DEALLOCATE(risMap)
+      IF (ALLOCATED(grisMap))  DEALLOCATE(grisMap)
 
       IF (ALLOCATED(Ao))       DEALLOCATE(Ao)
       IF (ALLOCATED(An))       DEALLOCATE(An)
@@ -750,24 +747,7 @@
 
 !     RIS model 
       IF (risFlag) THEN
-         DO iProj=1, RIS%nbrRIS
-            IF(ALLOCATED(risMapList(iProj)%map)) THEN
-               DEALLOCATE(risMapList(iProj)%map)
-            END IF
-            IF(ALLOCATED(grisMapList(iProj)%map)) THEN
-               DEALLOCATE(grisMapList(iProj)%map)
-            END IF
-         END DO
-         IF(ALLOCATED(risMapList)) DEALLOCATE(risMapList)
-         IF(ALLOCATED(grisMapList)) DEALLOCATE(grisMapList)
          IF(ALLOCATED(RIS%lst))    DEALLOCATE(RIS%lst)
-         IF(ALLOCATED(RIS%nbrIter))    DEALLOCATE(RIS%nbrIter)
-         IF(ALLOCATED(RIS%Res))    DEALLOCATE(RIS%Res)
-         IF(ALLOCATED(RIS%clsFlg))    DEALLOCATE(RIS%clsFlg)
-         IF(ALLOCATED(RIS%meanP))    DEALLOCATE(RIS%meanP)
-         IF(ALLOCATED(RIS%meanFl))    DEALLOCATE(RIS%meanFl)
-         IF(ALLOCATED(RIS%status))    DEALLOCATE(RIS%status)
-
          DEALLOCATE(RIS)
       END IF
 
