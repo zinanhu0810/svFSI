@@ -43,10 +43,11 @@
 
       LOGICAL flag
       INTEGER(KIND=IKIND) a, b, e, i, j, rowN, colN, iM, iFa, masN,
-     2   mnnzeic, mapIdx(2), jM
+     2   mnnzeic, mapIdx(2), jMRIS, iProj, rowNR
 
       INTEGER(KIND=IKIND), ALLOCATABLE :: uInd(:,:)
 
+      flag = .FALSE.
       ALLOCATE(idMap(tnNo))
       DO a=1, tnNo
          idMap(a) = a
@@ -67,35 +68,34 @@
                   colN = msh(iM)%IEN(b,e)
                   CALL ADDCOL(rowN, colN)
                END DO
-!               PRINT*,"before risFlg"
+
 !              Add extra connections for cooresponding nodes in case of RIS
                IF( risFlag ) THEN 
 !                 If rowN is in the list of ris nodes   
-                  mapIdx = FINDLOC(grisMap, rowN)
-                  IF(mapIdx(1).NE.0) THEN 
-!                      print*,rowN, "RIS found ", rowN
-                      print*,nMsh
-                     DO jM=1, 2 
-!                        PRINT*, "jM is", jM 
-                        IF(jM .EQ. iM) CYCLE
-                        rowN = grisMap(jM, mapIdx(2))
-
-
-!                        PRINT*, msh(iM)%eNoN
+                  ! loop through all projection and find the one that
+                  ! is associated with the current mesh
+                  DO iProj=1, RIS%nbrRIS
+                     IF (RIS%lst(1,1,iProj).EQ.iM) THEN
+                        jMRIS = 2
+                     ELSE IF (RIS%lst(2,1,iProj).EQ.iM) THEN
+                        jMRIS = 1
+                     ELSE
+                        CYCLE
+                     END IF
+                     mapIdx = FINDLOC(grisMapList(iProj)%map, rowN)
+                     IF(mapIdx(1).NE.0) THEN 
+                        rowNR = grisMapList(iProj)%map(jMRIS, mapIdx(2))
+                        if (rowNR .EQ. 0) CYCLE
                         DO b=1, msh(iM)%eNoN
                            colN = msh(iM)%IEN(b,e)
-!                            write(*,*)" adding node ", colN
-                           CALL ADDCOL(rowN, colN)
-!                           PRINT*,"end one"
+                           CALL ADDCOL(rowNR, colN)
                         END DO
-                     END DO
-                  END IF
+                     END IF
+                  END DO
                END IF
-
             END DO
          END DO
       END DO
-
 !     Treat shells with triangular elements here
       DO iM=1, nMsh
          IF (.NOT.shlEq .OR. .NOT.msh(iM)%lShl) CYCLE
@@ -125,7 +125,6 @@
 !     master node as a column entry in each row for all the slave nodes.
 !     This step is performed even for ghost master nodes where the idMap
 !     points to the ghost master node.
-      flag = .FALSE.
       DO i=1, nEq
          DO j=1, eq(i)%nBc
             iM  = eq(i)%bc(j)%iM
@@ -144,7 +143,6 @@
             END IF
          END DO
       END DO
-
 !     Change uInd if idMap has been changed
       IF (flag) THEN
          DO a=1, tnNo
@@ -193,7 +191,7 @@
             END IF
          END DO
       END IF
-
+      
 !--------------------------------------------------------------------
 !     Finding number of non-zeros in colPtr vector
       nnz = 0
@@ -223,7 +221,6 @@
          rowPtr(rowN+1) = j
       END DO
       DEALLOCATE (uInd)
-
       RETURN
       CONTAINS
 !--------------------------------------------------------------------
@@ -232,7 +229,7 @@
          INTEGER(KIND=IKIND), INTENT(IN) :: row, col
 
          INTEGER(KIND=IKIND) i, j
-
+         
          i = 0
          DO
             i = i + 1
@@ -249,7 +246,6 @@
 
 !           If column entry already exists, exit
             IF (col .EQ. uInd(i,row)) EXIT
-
 !           If we are this point, then then the current entry is bigger.
 !           Shift all the entries from here to the end of the list. If
 !           list is full, we request a larger list, otherwise we shift
@@ -275,6 +271,7 @@
          ALLOCATE(tmp(n,tnNo))
          tmp(:,:) = uInd(:,:)
          DEALLOCATE(uInd)
+         ! After resizing it's still not big enough??
          mnnzeic = n + MAX(5,n/5)
          ALLOCATE(uInd(mnnzeic,tnNo))
          uInd(:,:)   = 0

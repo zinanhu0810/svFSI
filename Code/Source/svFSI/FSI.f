@@ -285,20 +285,21 @@ C                     write(*,*)" DDir = ", DDir
                CALL USTRUCT_DOASSEM(eNoN, ptr, lKd, lK, lR)
             ELSE
                CALL DOASSEM(eNoN, ptr, lK, lR)
-               IF( risFlag .AND. (RIS%clsFlg.EQ.0)) THEN 
-                   CALL DOASSEM_RIS(eNoN, ptr, lK, lR)
+               IF( risFlag) THEN 
+                   IF (.NOT. ALL(RIS%clsFlg)) THEN
+                      CALL DOASSEM_RIS(eNoN, ptr, lK, lR)
+                   END IF
                END IF
             END IF
 #ifdef WITH_TRILINOS
          END IF
 #endif
       END DO ! e: loop
-
       DEALLOCATE(ptr, xl, al, yl, dl, bfl, fN, pS0l, pSl, ya_l, lR, lK,
      2   lKd)
 
       CALL DESTROY(fs(1))
-CALL DESTROY(fs(2))
+      CALL DESTROY(fs(2))
 
       RETURN
       END SUBROUTINE CONSTRUCT_FSI

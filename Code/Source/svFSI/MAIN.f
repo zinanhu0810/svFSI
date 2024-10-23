@@ -42,7 +42,8 @@
       IMPLICIT NONE
 
       LOGICAL l1, l2, l3
-      INTEGER(KIND=IKIND) i, iM, iBc, ierr, iEqOld, stopTS, j
+      INTEGER(KIND=IKIND) i, iM, iBc, ierr, iEqOld, stopTS, j, 
+     2      iProj
       REAL(KIND=RKIND) timeP(3)
 
       INTEGER(KIND=IKIND), ALLOCATABLE :: incL(:)
@@ -50,9 +51,7 @@
 
       REAL(KIND=RKIND) v1(3), v2(3), v3(3), v4(3), p(3), V(3,2)
       REAL(KIND=RKIND)  v41(3), vp1(3), N(3), dotV4, dotP
-      INTEGER(KIND=IKIND) same, RIS0DREDO
-
-      RIS0DREDO = 10
+      INTEGER(KIND=IKIND) same 
 
       IF (IKIND.NE.LSIP .OR. RKIND.NE.LSRP) THEN
          STOP "Incompatible datatype precision between solver and FSILS"
@@ -74,16 +73,15 @@
 
 !     Reading the user-defined parameters from foo.inp
  101  CALL READFILES
-
 !     Doing the partitioning and distributing the data to the all
 !     Processors
       CALL DISTRIBUTE
-      
+
 !     Initializing the solution vectors and constructing LHS matrix
 !     format
       CALL INITIALIZE(timeP)
       stopTS = nTS
-      
+
       dbg = 'Allocating intermediate variables'
       ALLOCATE(Ag(tDof,tnNo), Yg(tDof,tnNo), Dg(tDof,tnNo),
      2   res(nFacesLS), incL(nFacesLS))
@@ -102,7 +100,6 @@
 !     variables, i.e. An, Yn, and Dn
          cTS    = cTS + 1
          time   = time + dt
-
 ! --- RIS GOTO 1 should be here, we do not update the time but we redo all the rest          
 11       cEq    = 1
          eq%itr = 0
@@ -119,7 +116,6 @@
 
 !     Apply Dirichlet BCs strongly
          CALL SETBCDIR(An, Yn, Dn)
-
 !     Inner loop for iteration
          DO
             iEqOld = cEq
@@ -203,8 +199,8 @@
             END DO
 
             dbg = "Solving equation <"//eq(cEq)%sym//">"
+            !2, incL, res
             CALL LSSOLVE(eq(cEq), incL, res)
-
 !        Solution is obtained, now updating (Corrector)
             CALL PICC
 
@@ -281,26 +277,34 @@
 
 ! ---- Here we probably have to update the ris resistance value
 ! ---- If the state has to change, we recompute this time step GOTO 1
-! ---- Control where if the time and the new has changed!
-         write(*,*) "CHECK RIS: ", cEq, risFlag 
-         IF ((cEq .GE. 1) .AND. risFlag ) THEN 
+! ---- Control where if the time and the new has changed! 
+         IF ( (cEq.EQ.1) .AND. risFlag ) THEN 
             CALL RIS_MEANQ
-            CALL RIS_UPDATER
-
-            write(*,*)" Iteration : " , cTS
-            write(*,*)" Is the valve close? ", RIS%clsFlg
             CALL RIS_STATUS
-            write(*,*)" The status is ", RIS%status
-            IF( RIS%nbrIter .LE. 6) GOTO 11
-!             IF( RIS%nbrIter .EQ. 0) GOTO 11
-
+            std = " Iteration: "//cTS
+            DO iProj=1, RIS%nbrRIS
+                std = "Status for RIS projection: "//iProj
+                std = "  RIS iteration: "//RIS%nbrIter(iProj)
+                std = "  Is the valve close? "//RIS%clsFlg(iProj)
+                std = "  The status is "//RIS%status(iProj)
+            END DO
+            IF((.NOT.ALL(RIS%status)))THEN 
+                IF (ANY(RIS%nbrIter.LE.5)) THEN
+                    std = "Valve status just changed. Do not update"
+                ELSE
+                    CALL RIS_UPDATER
+                    GOTO 11
+                END IF
+!                GOTO 11
+            END IF
+            
          END IF
 
          IF ((cEq.EQ.1) .AND. ris0DFlag ) THEN 
             CALL RIS0D_STATUS
 
-!          edo the fluid iteration without updating the time 
-           IF( RisnbrIter .LE. 10) GOTO 11
+!          Redo the fluid iteration without updating the time 
+           IF( RisnbrIter .LE. 5) GOTO 11
 
          END IF
 
@@ -342,7 +346,6 @@ C             IF( time .EQ. 0.5) urisActFlag = .FALSE.
             CALL URIS_WRITEVTUS(uris%Yd)
          END IF
 !---     end RIS/URIS stuff 
-
 
 !     Solution is stored here before replacing it at next time step
          Ao = An

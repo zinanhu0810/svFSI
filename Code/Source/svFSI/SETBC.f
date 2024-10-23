@@ -273,7 +273,6 @@
       IF (BTEST(lBc%bType,bType_cpl) .OR.
      2    BTEST(lBc%bType,bType_RCR)) THEN
          h(1) = lBc%g
-!         IF(cm%mas()) PRINT*, lBc%g
       ELSE
          IF (BTEST(lBc%bType,bType_gen)) THEN
 !     Using "hl" as a temporary variable here
@@ -305,9 +304,6 @@
             Ac     = lFa%gN(a)
             hg(Ac) = -h(1)*lBc%gx(a)
          END DO
-!         IF(cm%mas()) PRINT*,"here hg", nNo
-!         IF(cm%mas()) PRINT*,"hg(1)",hg(1)
-!         IF(cm%mas()) PRINT*,"hg(10)",hg(10)
       END IF
 
 !     Add Neumann BCs contribution to the LHS/RHS
@@ -720,7 +716,7 @@
       REAL(KIND=RKIND), INTENT(IN) :: Yg(tDof,tnNo), Dg(tDof,tnNo)
 
       INTEGER(KIND=IKIND) :: iBc, iFa, iM
-      INTEGER(KIND=IKIND) :: i, j, M, Fa, found
+      INTEGER(KIND=IKIND) :: i, j, M, Fa, found, projFound,iProj
 
       DO iBc=1, eq(cEq)%nBc
          iM  = eq(cEq)%bc(iBc)%iM
@@ -728,30 +724,36 @@
          IF (.NOT.eq(cEq)%bc(iBc)%weakDir) CYCLE
 
 !        IF we are in ris and the valve isn't close, cycle 
-         IF( risFlag ) THEN 
+         DO iProj = 1, RIS%nbrRIS
             found = 0
-            DO i = 1, 2 
-               M = RIS%lst(i,1,1)
-               IF( M .EQ. iM ) THEN 
+            projFound = 0
+            IF( risFlag ) THEN 
+               DO i = 1, 2 
+                  M = RIS%lst(i,1,iProj)
+                  IF( M .EQ. iM ) THEN 
 
-                  Fa = RIS%lst(i,2,1)
-                  IF( (Fa .EQ. iFa ) ) 
-     2                       THEN 
-                     found = 1 
+                     Fa = RIS%lst(i,2,iProj)
+                     IF( (Fa .EQ. iFa ) ) 
+     2                          THEN 
+!                       The face of this mesh should be associated with
+!                       only one RIS projection.                     
+                        found = 1 
+                        projFound = iProj
+                     END IF
                   END IF
-               END IF
-            END DO
-         END IF
+               END DO
+            END IF
+            IF( (found .EQ. 1).AND.(.NOT.RIS%clsFlg(projFound))) THEN 
+               CYCLE
+            END IF 
 
-         IF( (found .EQ. 1).AND.(RIS%clsFlg.EQ.0)) THEN 
-            CYCLE
-         END IF 
+            IF( found .EQ. 1) write(*,*)"We do weakly RIS BC for 
+     2          RIS Proj", iProj
 
-         IF( found .EQ. 1) write(*,*)" We do weakly RIS BC "
+            CALL SETBCDIRWL(eq(cEq)%bc(iBc), msh(iM), msh(iM)%fa(iFa), 
+     2          Yg, Dg)
+         END DO
 
-
-         CALL SETBCDIRWL(eq(cEq)%bc(iBc), msh(iM), msh(iM)%fa(iFa), Yg,
-     2      Dg)
       END DO
 
       RETURN
@@ -842,17 +844,8 @@
          Ec    = lFa%gE(e)
          cDmn  = DOMAIN(lM, cEq, Ec)
          cPhys = eq(cEq)%dmn(cDmn)%phys
-!         IF (cPhys .NE. phys_fluid) err = "Weakly applied Dirichlet "//
-!     2      "BC is allowed for fluid phys only"
- 
-         IF (cPhys .NE. phys_fluid) THEN
-            IF (.NOT. risFlag) THEN
-                err = "Weakly applied Dirichlet BC is allowed for " //
-     2          "fluid phys only, skipping"
-            ELSE
-                CYCLE
-            END IF
-         END IF
+         IF (cPhys .NE. phys_fluid) err = "Weakly applied Dirichlet "//
+     2      "BC is allowed for fluid phys only"
 
 !        Initialize local residue and stiffness
          lR = 0._RKIND
@@ -972,8 +965,6 @@
          DO iBc=1, eq(iEq)%nBc
             iFa = eq(iEq)%bc(iBc)%iFa
             iM  = eq(iEq)%bc(iBc)%iM
-            ! ZH 03/27/2023: added this line to update the area
-            CALL BCINI(eq(iEq)%bc(iBc), msh(iM)%fa(iFa))
             ptr = eq(iEq)%bc(iBc)%cplBCptr
 
             IF (BTEST(eq(iEq)%bc(iBc)%bType,bType_RCR)) THEN
@@ -985,14 +976,12 @@
                   cplBC%fa(ptr)%Qn = Integ(msh(iM)%fa(iFa),Yn,1,nsd)
                   cplBC%fa(ptr)%Po = 0._RKIND
                   cplBC%fa(ptr)%Pn = 0._RKIND
-!                  IF (cm%mas()) PRINT*, "cpl bc in Neu"
                ELSE IF (BTEST(eq(iEq)%bc(iBc)%bType,bType_Dir)) THEN
                   tmp = msh(iM)%fa(iFa)%area
                   cplBC%fa(ptr)%Po = Integ(msh(iM)%fa(iFa),Yo,nsd+1)/tmp
                   cplBC%fa(ptr)%Pn = Integ(msh(iM)%fa(iFa),Yn,nsd+1)/tmp
                   cplBC%fa(ptr)%Qo = 0._RKIND
                   cplBC%fa(ptr)%Qn = 0._RKIND
-!                 IF (cm%mas()) PRINT*, "cpl bc in Dir"
                END IF
             END IF
          END DO
@@ -1007,10 +996,6 @@
          iFa = eq(iEq)%bc(iBc)%iFa
          ptr = eq(iEq)%bc(iBc)%cplBCptr
          IF (ptr .NE. 0) eq(iEq)%bc(iBc)%g = cplBC%fa(ptr)%y
-!         IF (cm%mas() .AND. ptr .NE. 0) THEN
-!           PRINT*, "IBC IS ", iBc
-!           PRINT*, eq(iEq)%bc(iBc)%g
-!         END IF
       END DO
 
       RETURN
@@ -1431,4 +1416,4 @@
 
       RETURN
       END SUBROUTINE SETBCCMML
-!###############################################################
+!####################################################################

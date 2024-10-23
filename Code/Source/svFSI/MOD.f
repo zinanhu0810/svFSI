@@ -441,7 +441,6 @@
 !        Tolerance
          REAL(KIND=RKIND) :: tol = 1.E-6_RKIND
       END TYPE cntctModelType
-
 !--------------------------------------------------------------------
 !     All the subTypes are defined, now defining the major types that
 !     will be directly allocated
@@ -610,6 +609,10 @@
          TYPE(faceType), ALLOCATABLE :: fa(:)
 !        IB: tracers
          TYPE(traceType) :: trc
+!        RIS: flags of whether elemets are adjacent to RIS projections
+         LOGICAL, ALLOCATABLE :: eRIS(:)
+!        RIS: processor ids to change element partitions to
+         INTEGER(KIND=IKIND), ALLOCATABLE :: partRIS(:)
       END TYPE mshType
 
 !     Equation type
@@ -832,20 +835,20 @@
 !        Number of RIS surface 
          INTEGER(KIND=IKIND) :: nbrRIS = 0
 !        Count time steps where no check is needed         
-         INTEGER(KIND=IKIND) :: nbrIter = 100
+         INTEGER(KIND=IKIND), ALLOCATABLE :: nbrIter(:)
 !        List of meshes, and faces connected. The first face is the 
 !        proximal pressure's face, while the second is the distal one
          INTEGER(KIND=IKIND), ALLOCATABLE :: lst(:,:,:)
 !        Resistance value 
-         REAL(KIND=RKIND) :: Res = 0._RKIND
+         REAL(KIND=RKIND), ALLOCATABLE :: Res(:)
 !        Flag closed surface active, the valve is considerd open initially 
-         INTEGER(KIND=IKIND) :: clsFlg = 0
+         LOGICAL, ALLOCATABLE :: clsFlg(:)
 !        Mean distal and proximal pressure (1: distal, 2: proximal)
-         REAL(KIND=RKIND) :: meanP(2) = 0._RKIND
+         REAL(KIND=RKIND), ALLOCATABLE :: meanP(:, :)
 !        Mean flux on the RIS surface 
-         REAL(KIND=RKIND) :: meanFl = 0._RKIND
+         REAL(KIND=RKIND), ALLOCATABLE :: meanFl(:)
 !        Status RIS interface 
-         LOGICAL :: status = .TRUE.     
+         LOGICAL, ALLOCATABLE :: status(:)
       END TYPE risFace
 
 !     Unfitted Resistive Immersed surface data type
@@ -1019,10 +1022,14 @@ C          TYPE(ibCommType) :: cm
 !     IB: iblank used for immersed boundaries (1 => solid, 0 => fluid)
       INTEGER, ALLOCATABLE :: iblank(:)
 
+!     TO-DO: for now, better to organize these within a class      
+      TYPE :: Array2D
+        INTEGER, ALLOCATABLE :: map(:,:)
+      END TYPE Array2D
 !     RIS mapping array, with local (mesh) enumeration
-      INTEGER, ALLOCATABLE :: risMap(:,:)
+      TYPE(Array2D), ALLOCATABLE :: risMapList(:)
 !     RIS mapping array, with global (total) enumeration
-      INTEGER, ALLOCATABLE :: grisMap(:,:)
+      TYPE(Array2D), ALLOCATABLE :: grisMapList(:)
     
 
 !     Old time derivative of variables (acceleration)
