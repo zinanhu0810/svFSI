@@ -1035,8 +1035,6 @@ C                      write(*,*)" We have find the face "
             lFa = msh(iM)%fa(iFa)
 !           such update may be not correct
             tmp_new = Integ(lFa, sA)
-!           ZH:  05/01/23 add below code to update area for LPN with 
-!           effective direction
             CALL BCINI(eq(iEq)%bc(iBc), msh(iM)%fa(iFa))
  
             ptr = eq(iEq)%bc(iBc)%cplBCptr
@@ -1048,7 +1046,6 @@ C                      write(*,*)" We have find the face "
                   cplBC%fa(ptr)%Pn = 0._RKIND
                ELSE IF (BTEST(eq(iEq)%bc(iBc)%bType,bType_Dir)) THEN
                   tmp = msh(iM)%fa(iFa)%area
-!                  IF (cm%mas()) PRINT*, "area in set bc is " ,tmp_new
                   cplBC%fa(ptr)%Po = 
      2                Integ(msh(iM)%fa(iFa),Yo,nsd+1)/tmp_new
                   cplBC%fa(ptr)%Pn = 
@@ -1075,8 +1072,6 @@ C                      write(*,*)" We have find the face "
          iFa = eq(iEq)%bc(iBc)%iFa
          ptr = eq(iEq)%bc(iBc)%cplBCptr
          IF (ptr .NE. 0) eq(iEq)%bc(iBc)%g = cplBC%fa(ptr)%y
-!         IF (cm%mas() .AND. iBC .EQ. 1) 
-!     2     PRINT*,"g in 0D is ", eq(iEq)%bc(iBc)%g
       END DO
 
       RETURN
@@ -1184,7 +1179,7 @@ C                      write(*,*)" We have find the face "
 
       nDir  = 0
       nNeu  = 0
-!      IF (RisnbrIter .LE. 50) CYCLE
+
       IF (cm%mas()) THEN
          DO iFa=1, cplBC%nFa
             IF (cplBC%fa(iFa)%bGrp .EQ. cplBC_Dir) THEN
@@ -1194,24 +1189,51 @@ C                      write(*,*)" We have find the face "
             END IF
          END DO
          fid = 1
-         OPEN(fid, FILE=TRIM(cplBC%commuName), FORM='UNFORMATTED')
-         WRITE(fid) genFlag
-         WRITE(fid) dt
-         WRITE(fid) nDir
-         WRITE(fid) nNeu
-         DO iFa=1, cplBC%nFa
-            IF (cplBC%fa(iFa)%bGrp .EQ. cplBC_Dir) THEN
-               WRITE(fid) cplBC%fa(iFa)%Po, cplBC%fa(iFa)%Pn
-            END IF
-         END DO
-         DO iFa=1, cplBC%nFa
-            IF (cplBC%fa(iFa)%bGrp .EQ. cplBC_Neu) THEN
-               WRITE(fid) cplBC%fa(iFa)%Qo, cplBC%fa(iFa)%Qn
-            END IF
-         END DO
-         CLOSE(fid)
 
-         CALL SYSTEM(TRIM(cplBC%binPath)//" "//TRIM(cplBC%commuName))
+
+         IF ((genFLAG .NE. 'T') .AND. (genFLAG .NE. 'L')) THEN
+            OPEN(fid, FILE=TRIM(cplBC%commuName), FORM='UNFORMATTED')
+            WRITE(fid) genFlag
+            WRITE(fid) dt
+            WRITE(fid) nDir
+            WRITE(fid) nNeu
+            DO iFa=1, cplBC%nFa
+               IF (cplBC%fa(iFa)%bGrp .EQ. cplBC_Dir) THEN
+                  WRITE(fid) cplBC%fa(iFa)%Po, cplBC%fa(iFa)%Pn
+               END IF
+            END DO
+            DO iFa=1, cplBC%nFa
+               IF (cplBC%fa(iFa)%bGrp .EQ. cplBC_Neu) THEN
+                  WRITE(fid) cplBC%fa(iFa)%Qo, cplBC%fa(iFa)%Qn
+               END IF
+            END DO
+            CLOSE(fid)
+
+            CALL SYSTEM(TRIM(cplBC%binPath)//" "//TRIM(cplBC%commuName))
+         ELSE IF (RisnbrIter .GT. 20) THEN
+
+            OPEN(fid, FILE=TRIM(cplBC%commuName), FORM='UNFORMATTED')
+            WRITE(fid) genFlag
+            WRITE(fid) dt
+            WRITE(fid) nDir
+            WRITE(fid) nNeu
+            DO iFa=1, cplBC%nFa
+               IF (cplBC%fa(iFa)%bGrp .EQ. cplBC_Dir) THEN
+                  WRITE(fid) cplBC%fa(iFa)%Po, cplBC%fa(iFa)%Pn
+               END IF
+            END DO
+            DO iFa=1, cplBC%nFa
+               IF (cplBC%fa(iFa)%bGrp .EQ. cplBC_Neu) THEN
+                  WRITE(fid) cplBC%fa(iFa)%Qo, cplBC%fa(iFa)%Qn
+               END IF
+            END DO
+            CLOSE(fid)
+
+            CALL SYSTEM(TRIM(cplBC%binPath)//" "//TRIM(cplBC%commuName))
+
+         END IF
+
+
 
          OPEN(fid,FILE=cplBC%commuName,STATUS='OLD',FORM='UNFORMATTED')
          DO iFa=1, cplBC%nFa
