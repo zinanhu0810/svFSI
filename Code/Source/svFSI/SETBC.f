@@ -955,7 +955,11 @@
 
       LOGICAL RCRflag
       INTEGER(KIND=IKIND) iFa, ptr, iBc, iM
-      REAL(KIND=RKIND) tmp
+      TYPE(bcType) :: lBc
+      TYPE(faceType):: lFa
+      REAL(KIND=RKIND) tmp, tmp_new
+      REAL(KIND=RKIND), ALLOCATABLE :: sA(:)
+
 
       IF (cplBC%schm .EQ. cplBC_I) THEN
          CALL CALCDERCPLBC
@@ -965,6 +969,17 @@
          DO iBc=1, eq(iEq)%nBc
             iFa = eq(iEq)%bc(iBc)%iFa
             iM  = eq(iEq)%bc(iBc)%iM
+
+            IF (ALLOCATED(sA)) DEALLOCATE(sA)
+            ALLOCATE(sA(tnNo))
+            sA   = 1._RKIND
+            lFa = msh(iM)%fa(iFa)
+!           such update may be not correct
+            tmp_new = Integ(lFa, sA)
+!           ZH:  05/01/23 add below code to update area for LPN with 
+!           effective direction
+            CALL BCINI(eq(iEq)%bc(iBc), msh(iM)%fa(iFa))
+            
             ptr = eq(iEq)%bc(iBc)%cplBCptr
 
             IF (BTEST(eq(iEq)%bc(iBc)%bType,bType_RCR)) THEN
@@ -1022,6 +1037,7 @@
       DO iBc=1, eq(iEq)%nBc
          iFa = eq(iEq)%bc(iBc)%iFa
          iM  = eq(iEq)%bc(iBc)%iM
+
          ptr = eq(iEq)%bc(iBc)%cplBCptr
          IF (BTEST(eq(iEq)%bc(iBc)%bType,bType_RCR)) THEN
             IF (.NOT.RCRflag) RCRflag = .TRUE.
@@ -1111,24 +1127,50 @@
             END IF
          END DO
          fid = 1
-         OPEN(fid, FILE=cplBC%commuName, FORM='UNFORMATTED')
-         WRITE(fid) genFlag
-         WRITE(fid) dt
-         WRITE(fid) nDir
-         WRITE(fid) nNeu
-         DO iFa=1, cplBC%nFa
-            IF (cplBC%fa(iFa)%bGrp .EQ. cplBC_Dir) THEN
-               WRITE(fid) cplBC%fa(iFa)%Po, cplBC%fa(iFa)%Pn
-            END IF
-         END DO
-         DO iFa=1, cplBC%nFa
-            IF (cplBC%fa(iFa)%bGrp .EQ. cplBC_Neu) THEN
-               WRITE(fid) cplBC%fa(iFa)%Qo, cplBC%fa(iFa)%Qn
-            END IF
-         END DO
-         CLOSE(fid)
 
-         CALL SYSTEM(TRIM(cplBC%binPath)//" "//TRIM(cplBC%commuName))
+         IF ((genFLAG .NE. 'T') .AND. (genFLAG .NE. 'L')) THEN
+            OPEN(fid, FILE=TRIM(cplBC%commuName), FORM='UNFORMATTED')
+            WRITE(fid) genFlag
+            WRITE(fid) dt
+            WRITE(fid) nDir
+            WRITE(fid) nNeu
+            DO iFa=1, cplBC%nFa
+               IF (cplBC%fa(iFa)%bGrp .EQ. cplBC_Dir) THEN
+                  WRITE(fid) cplBC%fa(iFa)%Po, cplBC%fa(iFa)%Pn
+               END IF
+            END DO
+            DO iFa=1, cplBC%nFa
+               IF (cplBC%fa(iFa)%bGrp .EQ. cplBC_Neu) THEN
+                  WRITE(fid) cplBC%fa(iFa)%Qo, cplBC%fa(iFa)%Qn
+               END IF
+            END DO
+            CLOSE(fid)
+
+            CALL SYSTEM(TRIM(cplBC%binPath)//" "//TRIM(cplBC%commuName))
+         ELSE IF ((RIS%nbrIter(1) .GT. 5) 
+     2       .OR. (RIS%nbrIter(2) .GT. 5)) THEN
+
+            OPEN(fid, FILE=TRIM(cplBC%commuName), FORM='UNFORMATTED')
+            WRITE(fid) genFlag
+            WRITE(fid) dt
+            WRITE(fid) nDir
+            WRITE(fid) nNeu
+            DO iFa=1, cplBC%nFa
+               IF (cplBC%fa(iFa)%bGrp .EQ. cplBC_Dir) THEN
+                  WRITE(fid) cplBC%fa(iFa)%Po, cplBC%fa(iFa)%Pn
+               END IF
+            END DO
+            DO iFa=1, cplBC%nFa
+               IF (cplBC%fa(iFa)%bGrp .EQ. cplBC_Neu) THEN
+                  WRITE(fid) cplBC%fa(iFa)%Qo, cplBC%fa(iFa)%Qn
+               END IF
+            END DO
+            CLOSE(fid)
+
+            CALL SYSTEM(TRIM(cplBC%binPath)//" "//TRIM(cplBC%commuName))
+
+         END IF
+
 
          OPEN(fid,FILE=cplBC%commuName,STATUS='OLD',FORM='UNFORMATTED')
          DO iFa=1, cplBC%nFa

@@ -278,25 +278,24 @@
 ! ---- Here we probably have to update the ris resistance value
 ! ---- If the state has to change, we recompute this time step GOTO 1
 ! ---- Control where if the time and the new has changed! 
-         IF ( (cEq.EQ.1) .AND. risFlag ) THEN 
+         IF ((cEq.EQ.1) .AND. risFlag ) THEN 
             CALL RIS_MEANQ
             CALL RIS_STATUS
-            std = " Iteration: "//cTS
             DO iProj=1, RIS%nbrRIS
                 std = "Status for RIS projection: "//iProj
+                std = "  Current iteration: "//cTS
                 std = "  RIS iteration: "//RIS%nbrIter(iProj)
                 std = "  Is the valve close? "//RIS%clsFlg(iProj)
                 std = "  The status is "//RIS%status(iProj)
             END DO
+           
+             
             IF((.NOT.ALL(RIS%status)))THEN 
-                IF (ANY(RIS%nbrIter.LE.5)) THEN
-                    std = "Valve status just changed. Do not update"
-                ELSE
-                    CALL RIS_UPDATER
-                    GOTO 11
-                END IF
-!                GOTO 11
+                CALL RIS_UPDATER
             END IF
+             
+!           Redo fluid iteration without updating the time
+            IF (ANY(RIS%nbrIter.LE.5)) GOTO 11
             
          END IF
 

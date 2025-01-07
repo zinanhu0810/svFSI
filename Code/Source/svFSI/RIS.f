@@ -71,10 +71,6 @@
            iM = RIS%lst(i,1,iProj)
            iFa = RIS%lst(i,2,iProj)
 
-!          ERROR. HERRE FOR ALE, recompure the area with the new displacement 
-!          ^FK: But that shouldn't be a problem for pressure difference
-!          check since the area (change) above and below a RIS is the
-!          same?           
            tmp = msh(iM)%fa(iFa)%area
            RIS%meanP(iProj, i) = Integ(msh(iM)%fa(iFa),tmpV,1)/tmp
         END DO
@@ -351,25 +347,25 @@
       INTEGER(KIND=IKIND) :: iProj
 
       DO iProj = 1, RIS%nbrRIS
-!         IF((RIS%nbrIter(iProj).LE.5) .AND. (RIS%status(iProj))) CYCLE
-         IF((RIS%nbrIter(iProj).LE.10)) CYCLE
 
 !        The valve is closed check if it should open
          IF (RIS%clsFlg(iProj)) THEN 
-!          OPENING CONDITION: Check condition on the pressure difference        
-            IF( RIS%meanP(iProj, 1) .GT. RIS%meanP(iProj, 2)  ) THEN 
-               RIS%clsFlg(iProj) = .FALSE.
-               std="RIS Proj "//iProj//": Going from close to open."
-               RIS%nbrIter(iProj) = 0 
-               ! I needed to update the state variables when the valve 
-               ! goes from close to open to prevent the valve goes back
-               ! to close at the next iteration. This is needed only for
-               ! close to open and cannot be used for open to close.
-               Ao = An
-               Yo = Yn
-               IF (dFlag) Do = Dn
-               cplBC%xo = cplBC%xn
-            END iF
+!          OPENING CONDITION: Check condition on the pressure difference 
+            IF( RIS%meanFl(iProj) .GE. -1.) THEN       
+              IF(RIS%meanP(iProj, 1) .GT.(RIS%meanP(iProj, 2)+1333))THEN
+                 RIS%clsFlg(iProj) = .FALSE.
+                 std="RIS Proj "//iProj//": Going from close to open."
+                 RIS%nbrIter(iProj) = 0 
+                 ! I needed to update the state variables when the valve 
+                 ! goes from close to open to prevent the valve goes back
+                 ! to close at the next iteration. This is needed only for
+                 ! close to open and cannot be used for open to close.
+                 Ao = An
+                 Yo = Yn
+                 IF (dFlag) Do = Dn
+                 cplBC%xo = cplBC%xn
+              END iF
+           END IF
          ELSE 
 !        The valve is open, check if it should close. 
 !           CLOSING CONDITION: Check existence of a backflow
@@ -396,18 +392,21 @@
       DO iProj = 1, RIS%nbrRIS
          RIS%nbrIter(iProj) = RIS%nbrIter(iProj) + 1
          RIS%status(iProj) = .TRUE.
+
+         IF((RIS%nbrIter(iProj) .LE. 25)) CYCLE
 !        If the valve is closed, chech the pressure difference, 
 !        if the pressure difference is negative the valve should be open
 !        -> the status is then not admissible
          IF (RIS%clsFlg(iProj)) THEN 
-            IF( RIS%meanP(iProj,1) .GT. RIS%meanP(iProj,2)  ) THEN 
+            IF((RIS%meanFl(iProj) .GE. -1.) .AND. 
+     2       RIS%meanP(iProj,1) .GT.((RIS%meanP(iProj,2)+1333)))THEN 
                std= "RIS Proj "//iProj//": **** Not admissible, 
      2              it should be open **** "
                RIS%status(iProj) = .FALSE.
             END iF
          ELSE 
 
-!        If the valve is open, chech the flow, 
+!        If the valve is open, check the flow, 
 !        if the flow is negative the valve should be closed
 !        -> the status is then not admissible
             IF( RIS%meanFl(iProj) .LT. 0.) THEN 
@@ -415,6 +414,11 @@
      2              it should be closed **** "
                RIS%status(iProj) = .FALSE.
             END IF
+         END IF
+     
+         IF( RIS%nbrIter(iProj) .LE. 25 .AND. cTS .GT. 1) THEN
+            IF (.NOT.cm%seq()) CALL cm%bcast(RIS%nbrIter(iProj))
+            RETURN
          END IF
       END DO
 
