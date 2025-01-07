@@ -1287,29 +1287,74 @@
 !        Write coupling info from 3D to cplBC communication file
 !        (for GenBC, usually called GenBC.int)
          fid = 1
-         OPEN(fid, FILE=TRIM(cplBC%commuName), FORM='UNFORMATTED')
+!         OPEN(fid, FILE=TRIM(cplBC%commuName), FORM='UNFORMATTED')
 !        genFlag: Flag for how genBC behaves (I: Initializing,
 !        T: Iteration loop, L: Last iteration, D: Derivative)
-         WRITE(fid) genFlag
-         WRITE(fid) dt
-         WRITE(fid) nDir
-         WRITE(fid) nNeu
-         DO iFa=1, cplBC%nFa
-            IF (cplBC%fa(iFa)%bGrp .EQ. cplBC_Dir) THEN
-               WRITE(fid) cplBC%fa(iFa)%Po, cplBC%fa(iFa)%Pn
-            END IF
-         END DO
-         DO iFa=1, cplBC%nFa
-            IF (cplBC%fa(iFa)%bGrp .EQ. cplBC_Neu) THEN
-               WRITE(fid) cplBC%fa(iFa)%Qo, cplBC%fa(iFa)%Qn
-            END IF
-         END DO
-         CLOSE(fid)
+!         WRITE(fid) genFlag
+!         WRITE(fid) dt
+!         WRITE(fid) nDir
+!         WRITE(fid) nNeu
+!         DO iFa=1, cplBC%nFa
+!            IF (cplBC%fa(iFa)%bGrp .EQ. cplBC_Dir) THEN
+!               WRITE(fid) cplBC%fa(iFa)%Po, cplBC%fa(iFa)%Pn
+!            END IF
+!         END DO
+!         DO iFa=1, cplBC%nFa
+!            IF (cplBC%fa(iFa)%bGrp .EQ. cplBC_Neu) THEN
+!               WRITE(fid) cplBC%fa(iFa)%Qo, cplBC%fa(iFa)%Qn
+!            END IF
+!         END DO
+!         CLOSE(fid)
 
 !        Call genBC exec that reads the communication file GenBC.int
 !        The 0D solver will then overwrite GenBC.int with updated
 !        pressures, flowrates, and any other 0D state variables
-         CALL SYSTEM(TRIM(cplBC%binPath)//" "//TRIM(cplBC%commuName))
+!         CALL SYSTEM(TRIM(cplBC%binPath)//" "//TRIM(cplBC%commuName))
+
+!        Update the genBC communication for RIS valve. Do not
+!        communicate or update value with genBC file if the RIS valve
+!        just changes status and redo the simulation without time
+!        marching
+!        For general case
+         IF ((genFLAG .NE. 'T') .AND. (genFLAG .NE. 'L')) THEN
+            OPEN(fid, FILE=TRIM(cplBC%commuName), FORM='UNFORMATTED')
+            WRITE(fid) genFlag
+            WRITE(fid) dt
+            WRITE(fid) nDir
+            WRITE(fid) nNeu
+            DO iFa=1, cplBC%nFa
+               IF (cplBC%fa(iFa)%bGrp .EQ. cplBC_Dir) THEN
+                  WRITE(fid) cplBC%fa(iFa)%Po, cplBC%fa(iFa)%Pn
+               END IF
+            END DO
+            DO iFa=1, cplBC%nFa
+               IF (cplBC%fa(iFa)%bGrp .EQ. cplBC_Neu) THEN
+                  WRITE(fid) cplBC%fa(iFa)%Qo, cplBC%fa(iFa)%Qn
+               END IF
+            END DO
+            CLOSE(fid)
+            CALL SYSTEM(TRIM(cplBC%binPath)//" "//TRIM(cplBC%commuName))
+!        If the RIS valve have updated for over 5 time steps
+         ELSE IF ((RIS%nbrIter(1) .GT. 5) 
+     2       .OR. (RIS%nbrIter(2) .GT. 5)) THEN
+            OPEN(fid, FILE=TRIM(cplBC%commuName), FORM='UNFORMATTED')
+            WRITE(fid) genFlag
+            WRITE(fid) dt
+            WRITE(fid) nDir
+            WRITE(fid) nNeu
+            DO iFa=1, cplBC%nFa
+               IF (cplBC%fa(iFa)%bGrp .EQ. cplBC_Dir) THEN
+                  WRITE(fid) cplBC%fa(iFa)%Po, cplBC%fa(iFa)%Pn
+               END IF
+            END DO
+            DO iFa=1, cplBC%nFa
+               IF (cplBC%fa(iFa)%bGrp .EQ. cplBC_Neu) THEN
+                  WRITE(fid) cplBC%fa(iFa)%Qo, cplBC%fa(iFa)%Qn
+               END IF
+            END DO
+            CLOSE(fid)
+            CALL SYSTEM(TRIM(cplBC%binPath)//" "//TRIM(cplBC%commuName))
+         END IF
 
 !        Read outputs from genBC, which are in the same GenBC.int
          OPEN(fid,FILE=cplBC%commuName,STATUS='OLD',FORM='UNFORMATTED')
