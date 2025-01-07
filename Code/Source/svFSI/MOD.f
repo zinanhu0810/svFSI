@@ -151,7 +151,7 @@
 !        Robin: apply only in normal direction
          LOGICAL :: rbnN = .FALSE.
 !        Strong/Weak application of Dirichlet BC
-         INTEGER(KIND=IKIND) :: clsFlgRis = 1
+         INTEGER(KIND=IKIND) :: clsFlgRis = 0
 !        Pre/Res/Flat/Para... boundary types
          INTEGER(KIND=IKIND) :: bType = 0
 !        Pointer to coupledBC%face
@@ -164,6 +164,8 @@
          INTEGER(KIND=IKIND) lsPtr
 !        Clamped Neu BC master node parameter
          INTEGER(KIND=IKIND) masN
+!        Index of cap BC associated with this BC
+         INTEGER(KIND=IKIND) :: iCapBC = 0
 !        Defined steady value
          REAL(KIND=RKIND) :: g = 0._RKIND
 !        Neu: defined resistance
@@ -188,6 +190,8 @@
          TYPE(fcType), ALLOCATABLE :: gt
 !        Neu: RCR
          TYPE(rcrType) :: RCR
+!        Name of face that caps this surface
+         CHARACTER(LEN=stdL) :: capName = ""
       END TYPE bcType
 
 !     Body force data structure type
@@ -214,18 +218,8 @@
          INTEGER(KIND=IKIND) :: fType = 0
 !        Constant steady value
          REAL(KIND=8) :: g = 0._RKIND
-!        Total time for stress last
-         INTEGER(KIND=IKIND) :: tl = 0
-!        Time last at maximum stress
-         INTEGER(KIND=IKIND) :: pl = 0
-!        Time last for one cardiac cycle
-         INTEGER(KIND=IKIND) :: cyc = 0
-!        Number of nodes (control points) in a single element
-         INTEGER(KIND=IKIND) eNoN
 !        Unsteady time-dependent values
          TYPE(fcType) :: gt
-!        Steady but spatially dependant
-         INTEGER(KIND=IKIND), ALLOCATABLE :: gx(:)
 !        Cross-fiber (sheet) stress parameter
          REAL(KIND=RKIND) :: eta_s = 0._RKIND
       END TYPE fibStrsType
@@ -301,9 +295,9 @@
       END TYPE eccModelType
 
 !     Fluid viscosity model type
-      TYPE viscModelType
+      TYPE viscModelTypeFluid
 !        Type of constitutive model for fluid viscosity
-         INTEGER(KIND=IKIND) :: viscType = viscType_NA
+         INTEGER(KIND=IKIND) :: viscTypeF = viscTypeF_NA
 !        Limiting zero shear-rate viscosity value
          REAL(KIND=RKIND) :: mu_o = 0._RKIND
 !        Limiting high shear-rate viscosity (asymptotic) value
@@ -314,7 +308,15 @@
          REAL(KIND=RKIND) :: a = 0._RKIND
 !        Power-law exponent
          REAL(KIND=RKIND) :: n = 0._RKIND
-      END TYPE viscModelType
+      END TYPE viscModelTypeFluid
+
+!     Solid viscosity model type
+      TYPE viscModelTypeSolid
+!        Type of constitutive model for solid viscosity
+         INTEGER(KIND=IKIND) :: viscTypeS = viscTypeS_NA
+!        Viscosity value
+         REAL(KIND=RKIND) :: mu = 0._RKIND
+      END TYPE viscModelTypeSolid
 
 !     Domain type is to keep track with element belong to which domain
 !     and also different physical quantities
@@ -334,7 +336,9 @@
 !        Excitation-contraction coupling
          TYPE(eccModelType) :: ec
 !        Viscosity model for fluids
-         TYPE(viscModelType) :: visc
+         TYPE(viscModelTypeFluid) :: viscF
+!        Viscosity model for solids
+         TYPE(viscModelTypeSolid) :: viscS
       END TYPE dmnType
 
 !     Mesh adjacency (neighboring element for each element)
@@ -375,6 +379,8 @@
 
 !     The face type containing mesh at boundary
       TYPE faceType
+!        Flag for virtual face (i.e. face does not lie on volume mesh)
+         LOGICAL :: vrtual = .FALSE.
 !        Parametric direction normal to this face (NURBS)
          INTEGER(KIND=IKIND) d
 !        Number of nodes (control points) in a single element
@@ -393,6 +399,8 @@
          INTEGER(KIND=IKIND) nG
 !        Number of nodes
          INTEGER(KIND=IKIND) :: nNo = 0
+!        ID number of (virtual) face that caps this face
+         INTEGER(KIND=IKIND) :: capID = 0
 !        Global element Ids
          INTEGER(KIND=IKIND), ALLOCATABLE :: gE(:)
 !        Global node Ids
@@ -503,6 +511,19 @@
          REAL(KIND=RKIND) :: tol = 1.E-6_RKIND
       END TYPE cntctModelType
 
+!     Fiber direction type
+      TYPE fibDirType
+!        If fibers are located at nodes
+         LOGICAL :: locNd = .FALSE.
+!        If fibers are located at element centroids
+         LOGICAL :: locEl = .FALSE.
+!        If fibers are located at integration/quadrature points
+         LOGICAL :: locGP = .FALSE.
+!        Number of fiber directions
+         INTEGER(KIND=IKIND) nFn
+!        Fiber directions, used for electrophysiology and solid mechanics
+         REAL(KIND=RKIND), ALLOCATABLE :: fN(:,:,:)
+      END TYPE fibDirType
 !--------------------------------------------------------------------
 !     All the subTypes are defined, now defining the major types that
 !     will be directly allocated
@@ -595,8 +616,6 @@
          INTEGER(KIND=IKIND) nSl
 !        The element type recognized by VTK format
          INTEGER(KIND=IKIND) vtkType
-!        Number of fiber directions
-         INTEGER(KIND=IKIND) nFn
 !        Mesh scale factor
          REAL(KIND=RKIND) scF
 !        IB: Mesh size parameter
@@ -608,7 +627,7 @@
          REAL(KIND=RKIND) tol
 
 !        The volume of this mesh
-         REAL(KIND=RKIND) :: v = 0._RKIND    
+         REAL(KIND=RKIND) :: v = 0._RKIND         
 !        Element distribution between processors
          INTEGER(KIND=IKIND), ALLOCATABLE :: eDist(:)
 !        Element domain ID number
@@ -650,9 +669,6 @@
          REAL(KIND=RKIND), ALLOCATABLE :: Nb(:,:)
 !        Normal vector to each nodal point (for Shells)
          REAL(KIND=RKIND), ALLOCATABLE :: nV(:,:)
-!        Fiber orientations stored at the element level - used for
-!        electrophysiology and solid mechanics
-         REAL(KIND=RKIND), ALLOCATABLE :: fN(:,:)
 !        Transmural coordinate for active strain type coupling
          REAL(KIND=RKIND), ALLOCATABLE :: tmX(:)
 !        Parent shape functions gradient
@@ -673,6 +689,12 @@
          TYPE(faceType), ALLOCATABLE :: fa(:)
 !        IB: tracers
          TYPE(traceType) :: trc
+!        RIS: flags of whether elemets are adjacent to RIS projections
+         LOGICAL, ALLOCATABLE :: eRIS(:)
+!        RIS: processor ids to change element partitions to
+         INTEGER(KIND=IKIND), ALLOCATABLE :: partRIS(:)
+!        Fiber direction type
+         TYPE(fibDirType) :: fib
       END TYPE mshType
 
 !     Equation type
@@ -699,6 +721,8 @@
          INTEGER(KIND=IKIND) :: nOutput = 0
 !        IB: Number of possible outputs
          INTEGER(KIND=IKIND) :: nOutIB = 0
+!        URIS: Number of possible outputs
+         INTEGER(KIND=IKIND) :: nOutURIS = 0
 !        Number of domains
          INTEGER(KIND=IKIND) :: nDmn = 0
 !        IB: Number of immersed domains
@@ -749,6 +773,8 @@
          TYPE(outputType), ALLOCATABLE :: output(:)
 !        IB: Outputs
          TYPE(outputType), ALLOCATABLE :: outIB(:)
+!        URIS: Outputs
+         TYPE(outputType), ALLOCATABLE :: outURIS(:)
 !        Body force associated with this equation
          TYPE(bfType), ALLOCATABLE :: bf(:)
       END TYPE eqType
@@ -893,22 +919,72 @@
 !        Number of RIS surface 
          INTEGER(KIND=IKIND) :: nbrRIS = 0
 !        Count time steps where no check is needed         
-         INTEGER(KIND=IKIND) :: nbrIter = 100
+         INTEGER(KIND=IKIND), ALLOCATABLE :: nbrIter(:)
 !        List of meshes, and faces connected. The first face is the 
-!        proximal pressure face, while the second is the distal one
+!        proximal pressure's face, while the second is the distal one
          INTEGER(KIND=IKIND), ALLOCATABLE :: lst(:,:,:)
 !        Resistance value 
-         REAL(KIND=RKIND) :: Res = 0._RKIND
+         REAL(KIND=RKIND), ALLOCATABLE :: Res(:)
 !        Flag closed surface active, the valve is considerd open initially 
-         INTEGER(KIND=IKIND) :: clsFlg = 0
+         LOGICAL, ALLOCATABLE :: clsFlg(:)
 !        Mean distal and proximal pressure (1: distal, 2: proximal)
-         REAL(KIND=RKIND) :: meanP(2) = 0._RKIND
+         REAL(KIND=RKIND), ALLOCATABLE :: meanP(:, :)
 !        Mean flux on the RIS surface 
-         REAL(KIND=RKIND) :: meanFl = 0._RKIND
+         REAL(KIND=RKIND), ALLOCATABLE :: meanFl(:)
 !        Status RIS interface 
-         LOGICAL :: status = .TRUE.     
+         LOGICAL, ALLOCATABLE :: status(:)
       END TYPE risFace
 
+!     Unfitted Resistive Immersed surface data type
+      TYPE urisType
+         CHARACTER(LEN=stdL) name
+!        Whether any file being saved
+         LOGICAL :: savedOnce = .FALSE.
+!        Total number of IB nodes
+         INTEGER(KIND=IKIND) :: tnNo
+!        Number of IB meshes
+         INTEGER(KIND=IKIND) :: nFa = 0
+!        Position coordinates
+         REAL(KIND=RKIND), ALLOCATABLE :: x(:,:)
+C !        Displacement (new)
+         REAL(KIND=RKIND), ALLOCATABLE :: Yd(:,:)
+!        Default signed distance value away from the valve
+         REAL(KIND=RKIND) :: sdf_default = 10._RKIND 
+!        Default distance value of the valve boundary
+         REAL(KIND=RKIND) :: sdf_deps = 0.25_RKIND 
+!        Displacements of the valve when it opens
+         REAL(KIND=RKIND), ALLOCATABLE :: DxOpen(:,:,:)
+!        Displacements of the valve when it closes
+         REAL(KIND=RKIND), ALLOCATABLE :: DxClose(:,:,:)
+!        Normal vector pointing positive flow direction
+         REAL(KIND=RKIND), ALLOCATABLE :: nrm(:)
+!        Close flag
+         LOGICAL :: clsFlg = .FALSE.
+!        Iteration count
+         INTEGER(KIND=IKIND) :: cnt = 1000000
+!        URIS: signed distance function of each node to the uris
+         REAL(KIND=RKIND), ALLOCATABLE :: sdf(:)       
+!        Mesh scale factor
+         REAL(KIND=RKIND) :: scF = 1._RKIND
+!        Mean pressure upstream
+         REAL(KIND=RKIND) :: meanPU = 0._RKIND         
+!        Mean pressure downstream
+         REAL(KIND=RKIND) :: meanPD = 0._RKIND         
+!        Relaxation factor to compute weighted averages of pressure
+!        values
+         REAL(KIND=RKIND) :: relax_factor = 0.5_RKIND         
+!        Array to store the fluid mesh elements that the uris node is in
+         INTEGER(KIND=IKIND), ALLOCATABLE :: elemId(:,:)
+!        Array to how many times a uris node is found in the fluid mesh
+!        of  a processor
+         INTEGER(KIND=IKIND), ALLOCATABLE :: elemCounter(:)
+
+!        DERIVED TYPE VARIABLES
+!        IB meshes
+         TYPE(mshType), ALLOCATABLE :: msh(:)
+C !        IB communicator
+C          TYPE(ibCommType) :: cm
+      END TYPE urisType
 !--------------------------------------------------------------------
 !     All the types are defined, time to use them
 
@@ -953,10 +1029,19 @@
       LOGICAL ibFlag
 !     Postprocess step - convert bin to vtk
       LOGICAL bin2VTK
-!     Whether any Immersed Boundary (IB) treatment is required
+!     Whether any RIS surface is considered 
       LOGICAL risFlag
-!
-      LOGICAL ris0DFlag
+!     Whether any one-sided RIS surface with 0D coupling is considered 
+      LOGICAL :: ris0DFlag = .FALSE.
+!     Whether any URIS surface is considered
+      LOGICAL :: urisFlag = .FALSE.  
+!     Whether the URIS surface is active
+      LOGICAL :: urisActFlag = .FALSE.  
+!     Number of URIS surfaces
+      INTEGER(KIND=IKIND) :: nUris      
+!     URIS resistance
+      REAL(KIND=RKIND) :: urisRes = 1.E5_RKIND 
+
 
 !     INTEGER(KIND=IKIND) VARIABLES
 !     Current domain
@@ -969,7 +1054,8 @@
       INTEGER(KIND=IKIND) startTS
 !     Current equation degrees of freedom
       INTEGER(KIND=IKIND) dof
-!     Global total number of nodes
+!     Global total number of nodes, across all meshes (total) and all
+!     procs (global)
       INTEGER(KIND=IKIND) gtnNo
 !     Number of equations
       INTEGER(KIND=IKIND) nEq
@@ -995,7 +1081,8 @@
       INTEGER(KIND=IKIND) stFileIncr
 !     Total number of degrees of freedom per node
       INTEGER(KIND=IKIND) tDof
-!     Total number of nodes
+!     Total number of nodes (number of nodes on the current proc across
+!     all meshes)
       INTEGER(KIND=IKIND) tnNo
 !     Restart Time Step
       INTEGER(KIND=IKIND) rsTS
@@ -1004,11 +1091,15 @@
 !     Nbr of iterations 
       INTEGER(KIND=IKIND) :: RisnbrIter = 0
 
+
+
 !     REAL VARIABLES
 !     Time step size
       REAL(KIND=RKIND) dt
 !     Time
       REAL(KIND=RKIND) time
+!     Simulation starting time
+      REAL(KIND=RKIND) :: start_time = 0._RKIND
 
 !     CHARACTER VARIABLES
 !     Initialization file path
@@ -1039,10 +1130,15 @@
 !     IB: iblank used for immersed boundaries (1 => solid, 0 => fluid)
       INTEGER, ALLOCATABLE :: iblank(:)
 
+!     TO-DO: for now, better to organize these within a class      
+      TYPE :: Array2D
+        INTEGER, ALLOCATABLE :: map(:,:)
+      END TYPE Array2D
 !     RIS mapping array, with local (mesh) enumeration
-      INTEGER, ALLOCATABLE :: risMap(:,:)
+      TYPE(Array2D), ALLOCATABLE :: risMapList(:)
 !     RIS mapping array, with global (total) enumeration
-      INTEGER, ALLOCATABLE :: grisMap(:,:)
+      TYPE(Array2D), ALLOCATABLE :: grisMapList(:)
+    
 
 !     Old time derivative of variables (acceleration)
       REAL(KIND=RKIND), ALLOCATABLE :: Ao(:,:)
@@ -1056,7 +1152,7 @@
       REAL(KIND=RKIND), ALLOCATABLE :: R(:,:)
 !     LHS matrix
       REAL(KIND=RKIND), ALLOCATABLE :: Val(:,:)
-!     Position vector
+!     Position vector of mesh nodes (in ref config)
       REAL(KIND=RKIND), ALLOCATABLE :: x(:,:)
 !     Old variables (velocity)
       REAL(KIND=RKIND), ALLOCATABLE :: Yo(:,:)
@@ -1089,10 +1185,6 @@
 !       := fiber contraction parameter for active strain model
       REAL(KIND=RKIND), ALLOCATABLE :: ec_Ya(:)
 
-
-!    fiber contraction time for manually input active stress
-      REAL(KIND=RKIND), ALLOCATABLE :: fib_Act(:)
-
 !     CMM-variable wall properties: 1-thickness, 2-Elasticity modulus
       REAL(KIND=RKIND), ALLOCATABLE :: varWallProps(:,:)
 
@@ -1120,6 +1212,8 @@
 !     Trilinos Linear Solver data type
       TYPE(tlsType), ALLOCATABLE :: tls
 !     risFace object
-      TYPE(risFace), ALLOCATABLE :: RIS 
+      TYPE(risFace), ALLOCATABLE :: RIS  
+!     unfitted RIS object
+      TYPE(urisType), ALLOCATABLE :: uris(:)
 
       END MODULE COMMOD

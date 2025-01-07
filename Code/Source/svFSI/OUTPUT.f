@@ -135,9 +135,10 @@
 
       REAL(KIND=RKIND), INTENT(IN) :: timeP(3)
 
-      INTEGER(KIND=IKIND) fid, myID
+      INTEGER(KIND=IKIND) fid, myID, iUris
       REAL(KIND=RKIND) tt
       CHARACTER(LEN=stdL) fName, tmpS
+      INTEGER(KIND=IKIND) :: urisCnt(nUris), urisClsFlg(nUris)
 
       fid  = 27
       myID = cm%tf()
@@ -154,6 +155,12 @@
          CLOSE(fid, STATUS='DELETE')
       END IF
 
+      IF (urisFlag) THEN
+          DO iUris=1, nUris
+            urisCnt(iUris) = uris(iUris)%cnt
+            urisClsFlg(iUris) = uris(iUris)%clsFlg
+          END DO
+      END IF
 !     This call is to block all processors
       CALL cm%bcast(fid)
 
@@ -175,6 +182,13 @@
                      WRITE(fid, REC=myID) stamp, cTS, time, tt-timeP(1),
      2                  eq%iNorm, cplBC%xn, Yn, An, Dn, Ad, Xion
                   END IF
+               ELSE IF (risFlag) THEN
+                  WRITE(fid, REC=myID) stamp, cTS, time,CPUT()-timeP(1),
+     2               eq%iNorm, cplBC%xn, Yn, An, Dn, Ad, RIS%clsFlg
+               ELSE IF (urisFlag) THEN
+                  WRITE(fid, REC=myID) stamp, cTS, time,CPUT()-timeP(1),
+     2               eq%iNorm, cplBC%xn, Yn, An, Dn, Ad, urisCnt, 
+     2               urisClsFlg
                ELSE
                   WRITE(fid, REC=myID) stamp, cTS, time,tt-timeP(1),
      2               eq%iNorm, cplBC%xn, Yn, An, Dn, Ad
@@ -192,6 +206,12 @@
                      WRITE(fid, REC=myID) stamp, cTS, time,tt-timeP(1),
      2                  eq%iNorm, cplBC%xn, Yn, An, Dn, Xion
                   END IF
+               ELSE IF (risFlag) THEN
+                  WRITE(fid, REC=myID) stamp, cTS, time,CPUT()-timeP(1),
+     2               eq%iNorm, cplBC%xn, Yn, An, Dn, RIS%clsFlg
+               ELSE IF (urisFlag) THEN
+                  WRITE(fid, REC=myID) stamp, cTS, time,CPUT()-timeP(1),
+     2               eq%iNorm, cplBC%xn, Yn, An, Dn, urisCnt, urisClsFlg
                ELSE
                   WRITE(fid, REC=myID) stamp, cTS, time,tt-timeP(1),
      2               eq%iNorm, cplBC%xn, Yn, An, Dn
@@ -202,6 +222,12 @@
             IF (cepEq) THEN
                WRITE(fid, REC=myID) stamp, cTS, time, tt-timeP(1),
      2            eq%iNorm, cplBC%xn, Yn, An, Xion
+            ELSE IF (risFlag) THEN
+               WRITE(fid, REC=myID) stamp, cTS, time,CPUT()-timeP(1),
+     2            eq%iNorm, cplBC%xn, Yn, An, RIS%clsFlg
+            ELSE IF (urisFlag) THEN
+               WRITE(fid, REC=myID) stamp, cTS, time,CPUT()-timeP(1),
+     2            eq%iNorm, cplBC%xn, Yn, An, urisCnt, urisClsFlg
             ELSE
                WRITE(fid, REC=myID) stamp, cTS, time, tt-timeP(1),
      2            eq%iNorm, cplBC%xn, Yn, An

@@ -97,7 +97,6 @@
 !     Don't write it when it doesn't suppose to be written
             wtn = eq(iEq)%output(iOut)%wtn(2:3)
             IF (ALL(.NOT.wtn)) CYCLE
-!            IF( RisnbrIter .LE. 50) CYCLE
             l = eq(iEq)%output(iOut)%l
             s = eq(iEq)%s + eq(iEq)%output(iOut)%o
             e = s + l - 1
@@ -122,7 +121,7 @@
                END DO
                l = 1
             CASE (outGrp_eFlx, outGrp_hFlx, outGrp_divV, outGrp_J,
-     2         outGrp_Mises, outGrp_fS)
+     2         outGrp_Mises, outGrp_Ya)
                CALL ALLPOST(tmpV, Yn, Dn, oGrp, iEq)
             CASE (outGrp_absV)
                DO a=1, tnNo
@@ -357,7 +356,6 @@
       LOGICAL :: lTH
       INTEGER(KIND=IKIND) iM, iFa, fid, i, iDmn
       REAL(KIND=RKIND) tmp
-      REAL(KIND=RKIND), ALLOCATABLE :: sA(:)
 
       fid = 1
       DO i=1, 2
@@ -373,15 +371,7 @@
                DO iFa=1, msh(iM)%nFa
                   IF (m .EQ. 1) THEN
                      IF (div) THEN
-                        IF(ALLOCATED(sA)) DEALLOCATE(sA)
-                        ALLOCATE(sA(tnNo))
-                        sA   = 1._RKIND
-                        tmp = Integ(msh(iM)%fa(iFa), sA)
-                !        tmp = msh(iM)%fa(iFa)%area
-!                        IF (cm%mas()) THEN
-!                           print*,"now area is ", tmp
-!                           print*,"og area is ", msh(iM)%fa(iFa)%area
-!                        END IF
+                        tmp = msh(iM)%fa(iFa)%area
                         tmp = Integ(msh(iM)%fa(iFa),tmpV,1)/tmp
                      ELSE
                         IF (pFlag .AND. lTH) THEN

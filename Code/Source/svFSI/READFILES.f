@@ -84,6 +84,7 @@
          saveIncr     = 10
          nITs         = 0
          startTS      = 0
+         start_time   = 0._RKIND
          roInf        = 0.2_RKIND
          stFileName   = "stFile"
          iniFilePath  = ""
@@ -94,6 +95,8 @@
          cmmInit      = .FALSE.
          cmmVarWall   = .FALSE.
          shlEq        = .FALSE.
+         urisFlag     = .FALSE.
+         urisActFlag  = .FALSE.
          pstEq        = .FALSE.
          sstEq        = .FALSE.
          cepEq        = .FALSE.
@@ -125,7 +128,6 @@
             appPath = STR(cm%np())//"-procs"//delimiter
          END IF
          IF (appPath .NE. "") CALL SYSTEM("mkdir -p "//TRIM(appPath))
-
          lPtr => list%get(std%oTS,"Verbose")
          lPtr => list%get(wrn%oTS,"Warning")
          lPtr => list%get(dbg%oTS,"Debug")
@@ -164,13 +166,14 @@
 
          lPtr => list%get(fTmp,"Simulation initialization file path")
          IF (ASSOCIATED(lPtr)) iniFilePath = fTmp%fname
+         lPtr => list%get(startTS,"Starting time step",ll=0)
+         lPtr => list%get(start_time,"Simulation start time")
 
          lPtr => list%get(nsd,"Number of spatial dimensions",
      2      1,ll=2,ul=3)
          nsymd = 3*(nsd-1)
 
          lPtr => list%get(nTs,"Number of time steps",1,ll=1)
-         lPtr => list%get(startTS,"Starting time step",ll=0)
          lPtr => list%get(dt,"Time step size",1,lb=0._RKIND)
          lPtr => list%get(nITs,"Number of initialization time steps",
      2      ll=0)
@@ -209,12 +212,19 @@
             IF (bin2VTK) err = "BIN to VTK conversion is not allowed"//
      2         " with dynamic remeshing"
          END IF
+
+         i = list%srch("Add URIS mesh")
+         IF (i .GT. 0) THEN
+            urisFlag = .TRUE.
+            urisActFlag = .TRUE.
+            CALL URIS_READMSH(list)
+
+         END IF
       END IF ! resetSim
 
 !--------------------------------------------------------------------
 !     Reading the mesh
       CALL READMSH(list)
-
 
 !     Reading immersed boundary mesh data
       i = list%srch("Add IB")
@@ -224,6 +234,7 @@
          CALL IB_READMSH(list)
          CALL IB_READOPTS(list)
       END IF
+
 
 !--------------------------------------------------------------------
 !     Reading equations
@@ -370,7 +381,7 @@
       TYPE(listType), INTENT(INOUT) :: list
       CHARACTER(LEN=stdL), INTENT(IN) :: eqName
 
-      INTEGER(KIND=IKIND), PARAMETER :: maxOutput = 24
+      INTEGER(KIND=IKIND), PARAMETER :: maxOutput = 26
 
       LOGICAL THflag
       INTEGER(KIND=IKIND) fid, iBc, iBf, iM, iFa, phys(4),
@@ -551,10 +562,9 @@
          propL(2,1) = damping
          propL(3,1) = elasticity_modulus
          propL(4,1) = poisson_ratio
-         propL(5,1) = solid_viscosity
-         propL(6,1) = f_x
-         propL(7,1) = f_y
-         IF (nsd .EQ. 3) propL(8,1) = f_z
+         propL(5,1) = f_x
+         propL(6,1) = f_y
+         IF (nsd .EQ. 3) propL(7,1) = f_z
          CALL READDOMAIN(lEq, propL, list)
 
          lPtr => list%get(pstEq, "Prestress")
@@ -566,7 +576,7 @@
             outPuts(3)  = out_cauchy
             outPuts(4)  = out_strain
          ELSE
-            nDOP = (/15,2,0,0/)
+            nDOP = (/16,2,0,0/)
             outPuts(1)  = out_displacement
             outPuts(2)  = out_mises
             outPuts(3)  = out_stress
@@ -579,9 +589,10 @@
             outPuts(10) = out_fibAlign
             outPuts(11) = out_velocity
             outPuts(12) = out_acceleration
-            outPuts(13) = out_fibStrn
+            outPuts(13) = out_fibStrtch
             outPuts(14) = out_CGstrain
             outPuts(15) = out_CGInv1
+            outPuts(16) = out_active
          END IF
 
          CALL READLS(lSolver_CG, lEq, list)
@@ -595,18 +606,17 @@
          propL(1,1) = solid_density
          propL(2,1) = elasticity_modulus
          propL(3,1) = poisson_ratio
-         propL(4,1) = solid_viscosity
-         propL(5,1) = ctau_M
-         propL(6,1) = ctau_C
-         propL(7,1) = f_x
-         propL(8,1) = f_y
-         IF (nsd .EQ. 3) propL(9,1) = f_z
+         propL(4,1) = ctau_M
+         propL(5,1) = ctau_C
+         propL(6,1) = f_x
+         propL(7,1) = f_y
+         IF (nsd .EQ. 3) propL(8,1) = f_z
          CALL READDOMAIN(lEq, propL, list)
 
          lPtr => list%get(pstEq, "Prestress")
          IF (pstEq) err = "Prestress for USTRUCT is not implemented yet"
 
-         nDOP = (/17,2,0,0/)
+         nDOP = (/18,2,0,0/)
          outPuts(1)  = out_displacement
          outPuts(2)  = out_mises
          outPuts(3)  = out_stress
@@ -621,9 +631,10 @@
          outPuts(12) = out_pressure
          outPuts(13) = out_acceleration
          outPuts(14) = out_divergence
-         outPuts(15) = out_fibStrn
+         outPuts(15) = out_fibStrtch
          outPuts(16) = out_CGstrain
          outPuts(17) = out_CGInv1
+         outPuts(18) = out_active
 
          CALL READLS(lSolver_GMRES, lEq, list)
 
@@ -779,21 +790,19 @@
          propL(2,2) = elasticity_modulus
          propL(3,2) = poisson_ratio
          propL(4,2) = damping
-         propL(5,2) = solid_viscosity
-         propL(6,2) = f_x
-         propL(7,2) = f_y
-         IF (nsd .EQ. 3) propL(8,2) = f_z
+         propL(5,2) = f_x
+         propL(6,2) = f_y
+         IF (nsd .EQ. 3) propL(7,2) = f_z
 
 !        ustruct properties
          propL(1,3) = solid_density
          propL(2,3) = elasticity_modulus
          propL(3,3) = poisson_ratio
-         propL(4,3) = solid_viscosity
-         propL(5,3) = ctau_M
-         propL(6,3) = ctau_C
-         propL(7,3) = f_x
-         propL(8,3) = f_y
-         IF (nsd .EQ. 3) propL(9,3) = f_z
+         propL(4,3) = ctau_M
+         propL(5,3) = ctau_C
+         propL(6,3) = f_x
+         propL(7,3) = f_y
+         IF (nsd .EQ. 3) propL(8,3) = f_z
 
 !        lElas properties
          propL(1,4) = solid_density
@@ -805,7 +814,7 @@
 
          CALL READDOMAIN(lEq, propL, list, phys)
 
-         nDOP = (/24,4,2,0/)
+         nDOP = (/26,4,2,0/)
          outPuts(1)  = out_velocity
          outPuts(2)  = out_pressure
          outPuts(3)  = out_displacement
@@ -830,9 +839,11 @@
          outPuts(20) = out_fibAlign
          outPuts(21) = out_CGstrain
          outPuts(22) = out_CGInv1
+         outPuts(23) = out_fibStrtch
+         outPuts(24) = out_active
 
-         outPuts(23) = out_divergence
-         outPuts(24) = out_acceleration
+         outPuts(25) = out_divergence
+         outPuts(26) = out_acceleration
 
          CALL READLS(lSolver_GMRES, lEq, list)
 
@@ -924,6 +935,21 @@
          lPBC => list%get(ctmp,"Add BC",iBc)
          CALL FINDFACE(ctmp, lEq%bc(iBc)%iM, lEq%bc(iBc)%iFa)
          CALL READBC(lEq%bc(iBc), lPBC, lEq%phys)
+      END DO
+
+!     If an LPN-coupled face has a cap, automatically create a coupled
+!     BC for the cap face. This is necessary because we need svFSI to
+!     process the cap face as a coupled BC to add its contribution to
+!     the tangent
+      DO iBc=1, lEq%nBc
+         IF (BTEST(lEq%bc(iBc)%bType, bType_cpl)) THEN
+            IF (lEq%bc(iBc)%capName .NE. "") THEN
+               ! Add a bc for the cap to the end of lEq%bc(:), and add
+               ! cap face info to the face being capped (capName and
+               ! capID fields)
+               CALL ADDCAPBC(lEq, iBc)
+            END IF
+         END IF
       END DO
 
 !     Initialize cplBC for RCR-type BC
@@ -1075,8 +1101,6 @@
             CASE (poisson_ratio)
                lPtr => lPD%get(rtmp,"Poisson ratio",1,ll=0._RKIND,
      2            ul=0.5_RKIND)
-            CASE (solid_viscosity)
-               lPtr => lPD%get(rtmp,"Viscosity",ll=0._RKIND)
             CASE (conductivity)
                lPtr => lPD%get(rtmp,"Conductivity",1,ll=0._RKIND)
             CASE (f_x)
@@ -1141,7 +1165,13 @@
          IF ((lEq%dmn(iDmn)%phys .EQ. phys_fluid)  .OR.
      2       (lEq%dmn(iDmn)%phys .EQ. phys_stokes) .OR.
      3       (lEq%dmn(iDmn)%phys.EQ.phys_CMM .AND. .NOT.cmmInit)) THEN
-            CALL READVISCMODEL(lEq%dmn(iDmn), lPD)
+            CALL READ_VISC_FLUID(lEq%dmn(iDmn), lPD)
+         END IF
+
+!        Read solid viscosity model parameters
+         IF ((lEq%dmn(iDmn)%phys .EQ. phys_struct)  .OR.
+     2       (lEq%dmn(iDmn)%phys .EQ. phys_ustruct)) THEN
+            CALL READ_VISC_SOLID(lEq%dmn(iDmn), lPD)
          END IF
       END DO
 
@@ -1468,12 +1498,12 @@
             lEq%output(iOut)%grp  = outGrp_C
             lEq%output(iOut)%o    = 0
             lEq%output(iOut)%l    = nsymd
-            lEq%output(iOut)%name = "CG_Strain"
+            lEq%output(iOut)%name = "Cauchy_strain"
          CASE (out_CGInv1)
             lEq%output(iOut)%grp  = outGrp_I1
             lEq%output(iOut)%o    = 0
             lEq%output(iOut)%l    = 1
-            lEq%output(iOut)%name = "CG_Strain_Trace"
+            lEq%output(iOut)%name = "Cauchy_strain_trace"
          CASE (out_divergence)
             lEq%output(iOut)%grp  = outGrp_divV
             lEq%output(iOut)%o    = 0
@@ -1484,11 +1514,16 @@
             lEq%output(iOut)%o    = 0
             lEq%output(iOut)%l    = 1
             lEq%output(iOut)%name = "Viscosity"
-         CASE (out_fibStrn)
-            lEq%output(iOut)%grp  = outGrp_fS
+         CASE (out_fibStrtch)
+            lEq%output(iOut)%grp  = outGrp_I4f
             lEq%output(iOut)%o    = 0
             lEq%output(iOut)%l    = 1
-            lEq%output(iOut)%name = "Fiber_shortening"
+            lEq%output(iOut)%name = "Fiber_stretch"
+         CASE (out_active)
+            lEq%output(iOut)%grp  = outGrp_Ya
+            lEq%output(iOut)%o    = 0
+            lEq%output(iOut)%l    = 1
+            lEq%output(iOut)%name = "Active"
          CASE DEFAULT
             err = "Internal output undefined"
          END SELECT
@@ -1570,8 +1605,6 @@
          lBc%bType = IBSET(lBc%bType,bType_Dir)
       CASE ("Neumann","Neu")
          lBc%bType = IBSET(lBc%bType,bType_Neu)
-         IF (phys.EQ.phys_fluid .OR. phys.EQ.phys_FSI)
-     2      lBc%bType = IBSET(lBc%bType,bType_bfs)
       CASE ("Traction","Trac")
          lBc%bType = IBSET(lBc%bType,bType_trac)
 
@@ -1615,6 +1648,12 @@
       CASE DEFAULT
          err = TRIM(list%ping("Type",lPtr))//" Unexpected BC type"
       END SELECT
+
+!       IF(BTEST(lBc%bType,bType_Ris0D)) THEN 
+! !        Read the resistance value here
+!          lPtr => list%get(lBc%res,"Resistance")
+!       END IF
+
 
 !     Allocate traction
       ALLOCATE(lBc%h(nsd))
@@ -1692,6 +1731,10 @@
             err = "'Couple to cplBC' must be specified before"//
      2         " using Coupled BC"
          END IF
+
+!        Read cap face name for this coupled BC
+         lPtr => list%get(lBc%capName, "Capping face")
+
       CASE ('Resistance')
          lBc%bType = IBSET(lBc%bType,bType_res)
          IF (.NOT.BTEST(lBc%bType,bType_Neu)) err = "Resistance"//
@@ -1934,7 +1977,7 @@ c     2         "can be applied for Neumann boundaries only"
          END SELECT
       END IF
 
-!     For Neumann BC, is load vector changing with deformation
+!     For Neumann BC, if the load vector changes with deformation
 !     (follower pressure)
       lBc%flwP = .FALSE.
       IF (BTEST(lBc%bType,bType_Neu)) THEN
@@ -2652,7 +2695,7 @@ c     2         "can be applied for Neumann boundaries only"
       TYPE(listType), INTENT(INOUT) :: lPD
 
       LOGICAL incompFlag, ltmp
-      INTEGER(KIND=IKIND) fid, i, j, a, Ac, iM, tl, s, pl,cyc
+      INTEGER(KIND=IKIND) fid, i, j
       REAL(KIND=RKIND) :: E, nu, lam, mu, kap, rtmp
       CHARACTER(LEN=stdL) ctmp
 
@@ -2819,58 +2862,6 @@ c     2         "can be applied for Neumann boundaries only"
      3         lDmn%stM%Tf%gt%r(lDmn%stM%Tf%gt%d,lDmn%stM%Tf%gt%n),
      4         lDmn%stM%Tf%gt%i(lDmn%stM%Tf%gt%d,lDmn%stM%Tf%gt%n))
             CALL FFT(fid, i, lDmn%stM%Tf%gt)
-
-         CASE ('spatial')
-            lDmn%stM%Tf%fType = IBSET(lDmn%stM%Tf%fType, bType_ud)
-
-         CASE ('general')
-            lDmn%stM%Tf%fType = IBSET(lDmn%stM%Tf%fType, bType_gen)
-            lPtr =>lFib%get(fTmp,"Temporal and spatial values file"//
-     2      " path",1)
-            fid = fTmp%open()
-
-            READ (fid,*) a, tl, pl, s, cyc
-            PRINT*,"the total number of node assigned fiber stress"//
-     2      " is ", a
-            PRINT*,"The last time for active stress is ",tl
-            PRINT*,"The last time at maximum active stress is ",pl
-            PRINT*,"peak active stress is ",s
-            PRINT*,"The step for cardiac cycle is ",cyc
-
-!            IF (nEQ .GT. 1) THEN 
-!               iM = 2
-!               IF (a .GT. msh(iM)%gnNo) err = "No. node out of bounds"//
-!     2            " (fiber stress for <>)"
-!               IF (a .LT. msh(iM)%gnNo) err = "some nodes are not "//
-!     2            "assigned (fiber stress for <>)"
-!            ELSE
-!               IF (a .GT. gtnNo) err = "No. node out of bounds"//
-!     2      " (fiber stress for <>)"
-!               IF (a .LT. gtnNo) err = "some nodes are not assigned"//
-!     2      " (fiber stress for <>)"
-!            END IF
-
-!           g in the general case stands for peak active stress           
-            lDmn%stM%Tf%g = s
-            lDmn%stM%Tf%tl = tl
-            lDmn%stM%Tf%pl = pl
-            lDmn%stM%Tf%cyc = cyc
-!           Store the active time for each node
-            IF (.NOT.ALLOCATED(fib_Act)) THEN
-               ALLOCATE(fib_Act(a))
-            END IF
-            fib_Act(a) = 0._RKIND
-
-!            DO i= 1, a
-!                READ (fid,*) fib_Act(i)
-!            END DO
-
-            ALLOCATE(lDmn%stM%Tf%gx(gtnNo))
-            lDmn%stM%Tf%gx(gtnNo) = 0._RKIND
-
-            DO i= 1, a
-                READ (fid,*) lDmn%stM%Tf%gx(i)
-            END DO
             CLOSE(fid)
 
          CASE DEFAULT
@@ -2918,67 +2909,6 @@ c     2         "can be applied for Neumann boundaries only"
 
       RETURN
       END SUBROUTINE READMATMODEL
-!####################################################################
-!     This subroutine reads parameters of non-Newtonian viscosity model
-      SUBROUTINE READVISCMODEL(lDmn, lPD)
-      USE COMMOD
-      USE LISTMOD
-      USE ALLFUN
-      IMPLICIT NONE
-      TYPE(dmnType), INTENT(INOUT) :: lDmn
-      TYPE(listType), INTENT(INOUT) :: lPD
-
-      TYPE(listType), POINTER :: lPtr, lVis
-      REAL(KIND=RKIND) :: rtmp
-      CHARACTER(LEN=stdL) ctmp
-
-      lVis => lPD%get(ctmp,"Viscosity",1)
-
-      CALL TO_LOWER(ctmp)
-      SELECT CASE (TRIM(ctmp))
-      CASE ("constant", "const", "newtonian")
-         lDmn%visc%viscType = viscType_Const
-         lPtr => lVis%get(lDmn%visc%mu_i,"Value",1,lb=0._RKIND)
-
-      CASE ("carreau-yasuda", "cy")
-         lDmn%visc%viscType = viscType_CY
-         lPtr => lVis%get(lDmn%visc%mu_i,
-     2      "Limiting high shear-rate viscosity",1,lb=0._RKIND)
-         lPtr => lVis%get(lDmn%visc%mu_o,
-     2      "Limiting low shear-rate viscosity",1,lb=0._RKIND)
-         lPtr => lVis%get(lDmn%visc%lam,
-     2      "Shear-rate tensor multiplier (lamda)",1,lb=0._RKIND)
-         lPtr => lVis%get(lDmn%visc%a,
-     2      "Shear-rate tensor exponent (a)",1,lb=0._RKIND)
-         lPtr => lVis%get(lDmn%visc%n,"Power-law index (n)",1,
-     2      lb=0._RKIND)
-         IF (lDmn%visc%mu_i .GT. lDmn%visc%mu_o) THEN
-            err = "Unexpected inputs for Carreau-Yasuda model. "//
-     2         "High shear-rate viscosity value should be higher than"//
-     3         " low shear-rate value"
-         END IF
-
-      CASE ("cassons", "cass")
-         lDmn%visc%viscType = viscType_Cass
-         lPtr => lVis%get(lDmn%visc%mu_i,
-     2      "Asymptotic viscosity parameter",1,lb=0._RKIND)
-         lPtr => lVis%get(lDmn%visc%mu_o,
-     2      "Yield stress parameter",1,lb=0._RKIND)
-         lDmn%visc%lam = 0.5_RKIND
-         lPtr => lVis%get(rtmp,"Low shear-rate threshold")
-         IF (ASSOCIATED(lPtr)) lDmn%visc%lam = rtmp
-
-      CASE DEFAULT
-         err = "Undefined constitutive model for viscosity used"
-      END SELECT
-
-      IF ((lDmn%phys .EQ. phys_stokes) .AND.
-     2    (lDmn%visc%viscType .NE. viscType_Const)) THEN
-         err = "Only constant viscosity is allowed for Stokes flow"
-      END IF
-
-      RETURN
-      END SUBROUTINE READVISCMODEL
 !####################################################################
 !     This subroutine reads general velocity data from bct.vtp
       SUBROUTINE READBCT(lMB, lFa, fName)
@@ -3496,4 +3426,149 @@ c     2         "can be applied for Neumann boundaries only"
 
       RETURN
       END SUBROUTINE READWALLPROPSFF
+!#######################################################################
+!     Adds a bc to lEq%bc(:) at the end for a cap. Copies most of the bc
+!     info from lEq%bc(iBc), which corresponds to the capped surface.
+!     Also, sets info about capping face in capped face (capName
+!     and capID fields)
+      SUBROUTINE ADDCAPBC(lEq, iBc)
+      USE COMMOD
+      USE ALLFUN
+      IMPLICIT NONE
+      TYPE(eqType), INTENT(INOUT) :: lEq
+      INTEGER(KIND=IKIND), INTENT(IN) :: iBc
+
+      TYPE(bcType), ALLOCATABLE :: oldBCs(:)
+      INTEGER(KIND=IKIND) jBc, iFa, iM
+
+!     We are adding a new BC for the cap, so we need to update the
+!     the relevant structures
+!     Store old BCs in oldBcs
+      ALLOCATE(oldBcs(lEq%nBc))
+      DO jBc=1, lEq%nBc
+         CALL COPYBC(lEq%bc(jBc), oldBcs(jBc))
+         CALL DESTROY(lEq%bc(jBc))
+      END DO
+
+!     Increment number of BCs
+      lEq%nBc = lEq%nBc + 1
+
+!     Reallocate lEq%bc with space for extra cap BC
+      DEALLOCATE(lEq%bc)
+      ALLOCATE(lEq%bc(lEq%nBc))
+
+!     Copy old BCs to lEq%bc
+      DO jBc=1, lEq%nBc-1
+         CALL COPYBC(oldBcs(jBc), lEq%bc(jBc))
+      END DO
+
+!     Add on new BC for capping surface. Copy BC information from the
+!     capped surface. This surface corresponds to index iBc - argument
+!     passed as input to this subroutine
+      CALL COPYBC(lEq%bc(iBc),  lEq%bc(lEq%nBc))
+
+!     Correct some values in capping surface BC (corresponding to nBc)
+      cplBC%nFa = cplBC%nFa + 1
+      lEq%bc(lEq%nBc)%cplBcPtr = cplBC%nFa
+      CALL FINDFACE(lEq%bc(iBc)%capName,
+     2              lEq%bc(lEq%nBc)%iM, lEq%bc(lEq%nBc)%iFa)
+      lEq%bc(lEq%nBC)%capName = ""
+
+!     Set capID pointer in the capped face
+      iFa = lEq%bc(iBc)%iFa
+      iM  = lEq%bc(iBc)%iM
+      msh(iM)%fa(iFa)%capID = lEq%bc(lEq%nBc)%iFa ! Copy cap face ID
+
+!     Set a pointer to the capping surface BC in the capped surface bc
+      lEq%bc(iBc)%iCapBC = lEq%nBc
+
+      END SUBROUTINE ADDCAPBC
+!#######################################################################
+!     Performs a deep copy of old BC (oBc) to new BC (nBc)
+      SUBROUTINE COPYBC(oBc, nBc)
+      USE COMMOD
+      USE ALLFUN
+      IMPLICIT NONE
+      TYPE(bcType), INTENT(IN) :: oBc
+      TYPE(bcType), INTENT(OUT) :: nBc
+
+      INTEGER(KIND=IKIND) iFa, iM
+
+!     Copy bool, integers, and real values
+      nBc%weakDir  = oBc%weakDir
+      nBc%flwP     = oBc%flwP
+      nBc%rbnN     = oBc%rbnN
+      nBc%bType    = oBc%bType
+      nBc%cplBCptr = oBc%cplBCptr
+      nBc%iFa      = oBc%iFa
+      nBc%iM       = oBc%iM
+      nBc%lsPtr    = oBc%lsPtr
+      nBc%masN     = oBc%masN
+      nBc%g        = oBc%g
+      nBc%r        = oBc%r
+      nBc%k        = oBc%k
+      nBc%c        = oBc%c
+      nBc%tauB     = oBc%tauB
+
+!     Set local iFa and iM
+      iFa = nBc%iFa
+      iM  = nBc%iM
+
+!     Now copy allocatable types but are always allocated
+      ALLOCATE(nBc%eDrn(nsd), nBc%h(nsd))
+      nBc%eDrn = oBc%eDrn
+      nBc%h    = oBc%h
+
+!     Now copy allocatable but derived types
+!     If the bc has spatial profile
+      IF (ALLOCATED(oBc%gx)) THEN
+         ALLOCATE(nBc%gx(msh(iM)%fa(iFa)%nNo))
+         nBc%gx = oBc%gx
+      END IF
+
+!     If the bc is a moving boundary
+      IF (ALLOCATED(oBc%gm)) THEN
+         ALLOCATE(nBc%gm)
+         nBc%gm%dof    = oBc%gm%dof
+         nBc%gm%nTP    = oBc%gm%nTP
+         nBc%gm%period = oBc%gm%period
+
+         ALLOCATE(nBc%gm%t(nBc%gm%nTP))
+         ALLOCATE(nBc%gm%d(nBc%gm%dof,msh(iM)%fa(iFa)%nNo,nBc%gm%nTP))
+         nBc%gm%t = oBc%gm%t
+         nBc%gm%d = oBc%gm%d
+      END IF
+
+!     If the bc has Fourier Coefficients set
+      IF (ALLOCATED(oBc%gt)) THEN
+         ALLOCATE(nBc%gt)
+         nBc%gt%lrmp = oBc%gt%lrmp
+         nBc%gt%n    = oBc%gt%n
+         nBc%gt%d    = oBc%gt%d
+         nBc%gt%T    = oBc%gt%T
+         nBc%gt%ti   = oBc%gt%ti
+
+         ALLOCATE(nBc%gt%qi(nBc%gt%d), nBc%gt%qs(nBc%gt%d))
+         nBc%gt%qi   = oBc%gt%qi
+         nBc%gt%qs   = oBc%gt%qs
+
+         ALLOCATE(nBc%gt%r(nBc%gt%d,nBc%gt%n))
+         ALLOCATE(nBc%gt%i(nBc%gt%d,nBc%gt%n))
+         nBc%gt%r    = oBc%gt%r
+         nBc%gt%i    = oBc%gt%i
+      END IF
+
+!     Copy RCR data structure
+      nBc%RCR%Rp = oBc%RCR%Rp
+      nBc%RCR%C  = oBc%RCR%C
+      nBc%RCR%Rd = oBc%RCR%Rd
+      nBc%RCR%Pd = oBc%RCR%Pd
+      nBc%RCR%Xo = oBc%RCR%Xo
+
+!     Copy cap data fields
+      nBc%capName = oBc%capName
+      nBc%iCapBC  = oBc%iCapBC
+
+      RETURN
+      END SUBROUTINE COPYBC
 !####################################################################

@@ -42,11 +42,17 @@
       IMPLICIT NONE
 
       LOGICAL l1, l2, l3
-      INTEGER(KIND=IKIND) i, j, iM, iBc, ierr, iEqOld, stopTS
+      INTEGER(KIND=IKIND) i, iM, iBc, ierr, iEqOld, stopTS, j, 
+     2      iProj, iUris
       REAL(KIND=RKIND) timeP(3)
 
       INTEGER(KIND=IKIND), ALLOCATABLE :: incL(:)
       REAL(KIND=RKIND), ALLOCATABLE :: Ag(:,:), Yg(:,:), Dg(:,:), res(:)
+
+      REAL(KIND=RKIND) v1(3), v2(3), v3(3), v4(3), p(3), V(3,2)
+      REAL(KIND=RKIND)  v41(3), vp1(3), N(3), dotV4, dotP, dt_ori,
+     2      dt_cum
+      INTEGER(KIND=IKIND) same 
 
       IF (IKIND.NE.LSIP .OR. RKIND.NE.LSRP) THEN
          STOP "Incompatible datatype precision between solver and FSILS"
@@ -55,6 +61,7 @@
       l1 = .FALSE.
       l2 = .FALSE.
       l3 = .FALSE.
+
 
       savedOnce = .FALSE.
       CALL MPI_INIT(i)
@@ -68,7 +75,6 @@
 
 !     Reading the user-defined parameters from foo.inp
  101  CALL READFILES
-
 !     Doing the partitioning and distributing the data to the all
 !     Processors
       CALL DISTRIBUTE
@@ -86,11 +92,14 @@
 !     Outer loop for marching in time. When entring this loop, all old
 !     variables are completely set and satisfy BCs.
       IF (cTS .LE. nITS) dt = dt/10._RKIND
+      dt_ori = dt
+      dt_cum = 0._RKIND
       DO
 !     Adjusting the time step size once initialization stage is over
          IF (cTS .EQ. nITS) THEN
             dt = dt*10._RKIND
             std = " New time step size: "//dt
+            dt_ori = dt
          END IF
 !     Incrementing time step, hence cTS will be associated with new
 !     variables, i.e. An, Yn, and Dn
@@ -112,12 +121,10 @@
 
 !     Apply Dirichlet BCs strongly
          CALL SETBCDIR(An, Yn, Dn)
-
+         IF (urisFlag) CALL URIS_CALCSDF
 !     Inner loop for iteration
          DO
             iEqOld = cEq
-
-!           cplBC is invoked only for the first equation
             IF (cplBC%coupled .AND. cEq.EQ.1) THEN
                CALL SETBCCPL
                CALL SETBCDIR(An, Yn, Dn)
@@ -192,15 +199,17 @@
             DO iBc=1, eq(cEq)%nBc
                i = eq(cEq)%bc(iBc)%lsPtr
                IF (i .NE. 0) THEN
-                  res(i) = eq(cEq)%gam*dt*eq(cEq)%bc(iBc)%r
+!              Resistance term for coupled Neu face tangent contribution
+                  res(i)  = eq(cEq)%gam*dt*eq(cEq)%bc(iBc)%r
                   incL(i) = 1
                END IF
             END DO
 
             dbg = "Solving equation <"//eq(cEq)%sym//">"
+            !2, incL, res
             CALL LSSOLVE(eq(cEq), incL, res)
 
-!        Solution is obtained, now updating (Corrector)
+!        Solution is obtained. Corrector and check for convergence
             CALL PICC
 
 !        Checking for exceptions
@@ -209,6 +218,7 @@
 !        Writing out the time passed, residual, and etc.
             IF (ALL(eq%ok)) EXIT
             CALL OUTRESULT(timeP, 2, iEqOld)
+
          END DO
 !     End of inner loop
 
@@ -220,6 +230,67 @@
             IF (ib%cpld .EQ. ibCpld_I) THEN
                ib%Auo = ib%Aun
                ib%Ubo = ib%Ubn
+            END IF
+         END IF
+! ---- Here we probably have to update the ris resistance value
+! ---- If the state has to change, we recompute this time step GOTO 1
+! ---- Control where if the time and the new has changed! 
+         IF ( risFlag ) THEN 
+            CALL RIS_MEANQ
+            CALL RIS_STATUS
+            std = " Iteration: "//cTS
+            dt_cum = dt_cum + dt
+            DO iProj=1, RIS%nbrRIS
+                std = "Status for RIS projection: "//iProj
+                std = "  RIS iteration: "//RIS%nbrIter(iProj)
+                std = "  Is the valve close? "//RIS%clsFlg(iProj)
+                std = "  The status is "//RIS%status(iProj)
+                IF (.NOT.RIS%status(iProj)) THEN
+                    ! If pressure difference is too big, repeat this
+                    ! time step with a much smaller dt
+                    IF ((RIS%meanP(iProj,1)-RIS%meanP(iProj,2))
+     2                  .GT.ABS(RIS%meanP(iProj,1)*0.01).AND.
+     3                      dt_ori/dt.LE.8._RKIND) THEN
+                        dt = dt/2._RKIND
+                        write(*,*) "Reducing time step to", dt
+                        dt_cum = 0._RKIND
+                        An = Ao
+                        Yn = Yo
+                        IF (dFlag) Dn = Do
+                        cplBC%xn = cplBC%xo
+                        GOTO 11
+                    END IF
+                END IF
+            END DO
+            IF (cTS .GE. 0) THEN
+                IF((.NOT.ALL(RIS%status)))THEN 
+                    IF (ANY(RIS%nbrIter.LE.2).AND.(cTS.GE.2)) THEN
+                        std = "Valve status just changed. Do not update"
+                    ELSE
+                        CALL RIS_UPDATER
+                        dt_cum = dt_cum - dt
+                        GOTO 11
+                    END IF
+                END IF
+            END IF
+            IF (dt_cum .LT. dt_ori) THEN
+                write(*,*) "Current time is: ", dt_cum, "total time is",
+     2              dt_ori, ". Solve for another time step with", dt
+                Ao = An
+                Yo = Yn
+                IF (dFlag) Do = Dn
+                cplBC%xo = cplBC%xn
+                CALL TXT(.FALSE.)
+                time = time + dt
+                write(*,*) "Set time to be", time
+                GOTO 11
+            ELSE
+                write(*,*) "Finished iterations for RIS"
+                time = time + dt - dt_cum
+                dt = dt_ori
+                dt_cum = 0._RKIND
+                write(*,*) "Restoring time step to", dt
+                write(*,*) "Restoring time to", time+dt
             END IF
          END IF
 
@@ -273,43 +344,46 @@
 
          IF (ibFlag) CALL IB_OUTCPUT()
 
-!     Exiting outer loop if l1
-         IF (l1) EXIT
+
+         IF ((cEq.EQ.1) .AND. ris0DFlag ) THEN 
+            CALL RIS0D_STATUS
+
+!          Redo the fluid iteration without updating the time 
+           IF( RisnbrIter .LE. 2) GOTO 11
+
+         END IF
+
+!        Part related to unfitted RIS
+!        If the valve is active, look at the pressure difference 
+         IF(urisFlag) THEN 
+            DO iUris=1, nUris
+               uris(iUris)%cnt = uris(iUris)%cnt + 1
+               IF( uris(iUris)%clsFlg ) THEN 
+                  CALL URIS_MEANP(iUris)
+                  IF( uris(iUris)%cnt .EQ. 1) THEN 
+                     GOTO 11
+                  END IF
+               ELSE 
+                  CALL URIS_MEANV(iUris)
+               END IF
+            END DO
+
+            IF (mvMsh) THEN 
+               CALL URIS_UpdateDisp !(Do,Dn)
+            END IF
+            IF (cm%mas()) CALL URIS_WRITEVTUS
+         END IF
+!---     end RIS/URIS stuff 
 
 !     Solution is stored here before replacing it at next time step
          Ao = An
          Yo = Yn
          IF (dFlag) Do = Dn
          cplBC%xo = cplBC%xn
-
-! ---- Here we probably have to update the ris resistance value
-! ---- If the state has to change, we recompute this time step GOTO 1
-! ---- Control where if the time and the new has changed! 
-         IF ((cEq.EQ.1) .AND. risFlag ) THEN 
-            CALL RIS_MEANQ
-            CALL RIS_UPDATER
-
-            write(*,*)" Iteration : " , cTS
-            write(*,*)" Is the valve close? ", RIS%clsFlg
-            CALL RIS_STATUS
-            write(*,*)" The status is ", RIS%status
-            IF( RIS%nbrIter .LE. 6) GOTO 11
-!             IF( RIS%nbrIter .EQ. 0) GOTO 11
-
-         END IF
-!         IF (cm%mas()) PRINT*, "cEq", cEq
-
-!         IF (cm%mas()) PRINT*, "ris0DFlag",ris0DFlag
-         IF ((cEq.EQ.1) .AND. ris0DFlag ) THEN 
-!            IF (cm%mas()) PRINT*, "to call RIS0D_Status"
-            CALL RIS0D_STATUS
-!           print*, " RisnbrIter = " , RisnbrIter
+!     Exiting outer loop if l1
+         IF (l1) EXIT
 
 
-!          Redo the fluid iteration without updating the time 
-           IF( RisnbrIter .LE. 20) GOTO 11
-
-         END IF
       END DO
 !     End of outer loop
 

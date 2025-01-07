@@ -45,8 +45,9 @@
       REAL(KIND=RKIND), INTENT(IN) :: Ag(tDof,tnNo), Yg(tDof,tnNo)
 
       LOGICAL :: vmsStab
-      INTEGER(KIND=IKIND) a, e, g, l, Ac, eNoN, cPhys
-      REAL(KIND=RKIND) w, Jac, ksix(nsd,nsd)
+      INTEGER(KIND=IKIND) a, e, g, l, Ac, eNoN, cPhys,iUris
+      REAL(KIND=RKIND) w, Jac, ksix(nsd,nsd), xq(nsd), DDir, DDirTmp,
+     2  distSrf(nUris)
       TYPE(fsType) :: fs(2)
 
       INTEGER(KIND=IKIND), ALLOCATABLE :: ptr(:)
@@ -63,6 +64,7 @@
          vmsStab = .FALSE.
       END IF
 
+      DDir = 0._RKIND
 !     l = 3, if nsd==2 ; else 6;
       l = nsymd
 
@@ -125,10 +127,34 @@
             END IF
             w = fs(1)%w(g) * Jac
 
+
+!--         Plot the coordinates of the quad point in the current configuration 
+            IF(urisFlag) THEN 
+               distSrf = 0._RKIND
+               DO a=1, eNoN 
+                  Ac = lM%IEN(a,e)
+                  DO iUris=1, nUris
+                     distSrf(iUris) = distSrf(iUris) + 
+     2                  fs(1)%N(a,g)*ABS(uris(iUris)%sdf(Ac))
+                  END DO
+               END DO 
+
+               DDir = 0._RKIND
+               DO iUris=1, nUris
+                  IF (distSrf(iUris).LE.uris(iUris)%sdf_deps) THEN
+                      DDirTmp = (1+COS(PI*distSrf(iUris)/
+     2                      uris(iUris)%sdf_deps))/
+     3                      (2*uris(iUris)%sdf_deps**2)
+                      IF (DDirTmp.GT.DDir) DDir = DDirTmp
+                  END IF
+               END DO
+
+               IF(.NOT.urisActFlag) DDir = 0._RKIND
+            END IF
             IF (nsd .EQ. 3) THEN
                CALL FLUID3D_M(vmsStab, fs(1)%eNoN, fs(2)%eNoN, w, ksix,
      2            fs(1)%N(:,g), fs(2)%N(:,g), Nwx, Nqx, Nwxx, al, yl,
-     3            bfl, lR, lK)
+     3            bfl, lR, lK, DDir)
 
              ELSE IF (nsd .EQ. 2) THEN
                CALL FLUID2D_M(vmsStab, fs(1)%eNoN, fs(2)%eNoN, w, ksix,
@@ -158,7 +184,7 @@
             IF (nsd .EQ. 3) THEN
                CALL FLUID3D_C(vmsStab, fs(1)%eNoN, fs(2)%eNoN, w, ksix,
      2            fs(1)%N(:,g), fs(2)%N(:,g), Nwx, Nqx, Nwxx, al, yl,
-     3            bfl, lR, lK)
+     3            bfl, lR, lK, DDir)
 
             ELSE IF (nsd .EQ. 2) THEN
                CALL FLUID2D_C(vmsStab, fs(1)%eNoN, fs(2)%eNoN, w, ksix,
@@ -176,9 +202,14 @@
          ELSE
 #endif
             CALL DOASSEM(eNoN, ptr, lK, lR)
-            IF( risFlag .AND. (RIS%clsFlg.EQ.0)) THEN 
-                CALL DOASSEM_RIS(eNoN, ptr, lK, lR)
+            IF( risFlag ) THEN 
+                IF (.NOT.ALL(RIS%clsFlg)) THEN
+                   CALL DOASSEM_RIS(eNoN, ptr, lK, lR)
+                END IF
             END IF
+C             IF( risFlag .AND. (RIS%clsFlg.EQ.1)) THEN 
+C                 CALL DOASSEM_VELRIS(eNoN, ptr, lK, lR)
+C             END IF
 #ifdef WITH_TRILINOS
          END IF
 #endif
@@ -193,7 +224,7 @@
       END SUBROUTINE CONSTRUCT_FLUID
 !####################################################################
       SUBROUTINE FLUID3D_M(vmsFlag, eNoNw, eNoNq, w, Kxi, Nw, Nq, Nwx,
-     2   Nqx, Nwxx, al, yl, bfl, lR, lK)
+     2   Nqx, Nwxx, al, yl, bfl, lR, lK, DDir)
       USE COMMOD
       USE ALLFUN
       IMPLICIT NONE
@@ -201,7 +232,7 @@
       INTEGER(KIND=IKIND), INTENT(IN) :: eNoNw, eNoNq
       REAL(KIND=RKIND), INTENT(IN) :: w, Kxi(3,3), Nw(eNoNw), Nq(eNoNq),
      2   Nwx(3,eNoNw), Nqx(3,eNoNq), Nwxx(6,eNoNw), al(tDof,eNoNw),
-     3   yl(tDof,eNoNw), bfl(3,eNoNw)
+     3   yl(tDof,eNoNw), bfl(3,eNoNw), DDir
       REAL(KIND=RKIND), INTENT(INOUT) :: lR(dof,eNoNw),
      2   lK(dof*dof,eNoNw,eNoNw)
 
@@ -210,7 +241,14 @@
      2   kS, kU, divU, gam, mu, mu_s, mu_g, p, pa, u(3), ud(3), px(3),
      3   f(3), up(3), ua(3), ux(3,3), uxx(3,3,3), es(3,3), es_x(3,3,3),
      4   esNx(3,eNoNw), mu_x(3), rV(3), rS(3), rM(3,3), updu(3,3,eNoNw),
-     5   uNx(eNoNw), upNx(eNoNw), uaNx(eNoNw), d2u2(3), NxNx, T1, T2
+     5   uNx(eNoNw), upNx(eNoNw), uaNx(eNoNw), d2u2(3), NxNx, T1, T2,Res
+
+      IF(.NOT.urisFlag) THEN
+          Res = 0._RKIND
+      ELSE
+          Res = urisRes
+      END IF
+
 
       ctM  = 1._RKIND
       ctC  = 36._RKIND
@@ -367,7 +405,7 @@
 
 !     Compute viscosity based on shear-rate and chosen viscosity model
 !     The returned mu_g := (d\mu / d\gamma)
-      CALL GETVISCOSITY(eq(cEq)%dmn(cDmn), gam, mu, mu_s, mu_g)
+      CALL GET_FLUID_VISC(eq(cEq)%dmn(cDmn), gam, mu, mu_s, mu_g)
 
       IF (ISZERO(gam)) THEN
          mu_g = 0._RKIND
@@ -378,6 +416,12 @@
 
 !     Stabilization parameters
       kT = 4._RKIND*(ctM/dt)**2._RKIND
+
+!     In case of unfitted RIS, compute the delta function at the quad point,
+!     add the additional value to the stabilization param 
+      kT = kT + (Res*DDir)**2._RKIND
+
+
 
       kU = u(1)*u(1)*Kxi(1,1) + u(2)*u(1)*Kxi(2,1) + u(3)*u(1)*Kxi(3,1)
      2   + u(1)*u(2)*Kxi(1,2) + u(2)*u(2)*Kxi(2,2) + u(3)*u(2)*Kxi(3,2)
@@ -401,9 +445,9 @@
       rS(3) = mu_x(1)*es(1,3) + mu_x(2)*es(2,3) + mu_x(3)*es(3,3)
      2      + mu*d2u2(3)
 
-      up(1) = -tauM*(rho*rV(1) + px(1) - rS(1))
-      up(2) = -tauM*(rho*rV(2) + px(2) - rS(2))
-      up(3) = -tauM*(rho*rV(3) + px(3) - rS(3))
+      up(1) = -tauM*(rho*rV(1) + px(1) - rS(1) + (Res*DDir)*u(1))
+      up(2) = -tauM*(rho*rV(2) + px(2) - rS(2) + (Res*DDir)*u(2))
+      up(3) = -tauM*(rho*rV(3) + px(3) - rS(3) + (Res*DDir)*u(3))
 
       IF (vmsFlag) THEN
          tauC = 1._RKIND / (tauM * (Kxi(1,1) + Kxi(2,2) + Kxi(3,3)))
@@ -430,7 +474,7 @@
       rV(2) = tauB*(up(1)*ux(1,2) + up(2)*ux(2,2) + up(3)*ux(3,2))
       rV(3) = tauB*(up(1)*ux(1,3) + up(2)*ux(2,3) + up(3)*ux(3,3))
 
-      rM(1,1) = mu*es(1,1) - rho*up(1)*ua(1) + rV(1)*up(1) - pa
+      rM(1,1) = mu*es(1,1) - rho*up(1)*ua(1) + rV(1)*up(1) - pa                                        
       rM(2,1) = mu*es(2,1) - rho*up(1)*ua(2) + rV(1)*up(2)
       rM(3,1) = mu*es(3,1) - rho*up(1)*ua(3) + rV(1)*up(3)
 
@@ -468,6 +512,7 @@
 
          T1 = -rho*uNx(a) + mu*(Nwxx(1,a) + Nwxx(2,a) + Nwxx(3,a))
      2      + mu_x(1)*Nwx(1,a) + mu_x(2)*Nwx(2,a) + mu_x(3)*Nwx(3,a)
+     3        - (Res*DDir)*Nw(a)
 
          updu(1,1,a) = mu_x(1)*Nwx(1,a) + d2u2(1)*mu_g*esNx(1,a) + T1
          updu(2,1,a) = mu_x(2)*Nwx(1,a) + d2u2(1)*mu_g*esNx(2,a)
@@ -504,7 +549,8 @@
 !           dRm_a1/du_b1
             T2 = (mu + tauC)*rM(1,1) + esNx(1,a)*mu_g*esNx(1,b)
      2         - rho*tauM*uaNx(a)*updu(1,1,b)
-            lK(1,a,b)  = lK(1,a,b)  + wl*(T2 + T1)
+            lK(1,a,b)  = lK(1,a,b)  + wl*(T2 + T1) 
+            lK(1,a,b)  = lK(1,a,b)  + (Res*DDir)*wl*Nw(b)*Nw(a)
 
 !           dRm_a1/du_b2
             T2 = mu*rM(2,1) + tauC*rM(1,2) + esNx(1,a)*mu_g*esNx(2,b)
@@ -525,6 +571,7 @@
             T2 = (mu + tauC)*rM(2,2) + esNx(2,a)*mu_g*esNx(2,b)
      2         - rho*tauM*uaNx(a)*updu(2,2,b)
             lK(6,a,b)  = lK(6,a,b)  + wl*(T2 + T1)
+            lK(6,a,b)  = lK(6,a,b)  + (Res*DDir)*wl*Nw(b)*Nw(a)
 
 !           dRm_a2/du_b3
             T2 = mu*rM(3,2) + tauC*rM(2,3) + esNx(2,a)*mu_g*esNx(3,b)
@@ -545,6 +592,7 @@
             T2 = (mu + tauC)*rM(3,3) + esNx(3,a)*mu_g*esNx(3,b)
      2         - rho*tauM*uaNx(a)*updu(3,3,b)
             lK(11,a,b) = lK(11,a,b) + wl*(T2 + T1)
+            lK(11,a,b) = lK(11,a,b) + (Res*DDir)*wl*Nw(b)*Nw(a)
          END DO
       END DO
 
@@ -558,6 +606,15 @@
 !           dRm_a3/dp_b
             lK(12,a,b) = lK(12,a,b) - wl*(Nwx(3,a)*Nq(b) - Nqx(3,b)*T1)
          END DO
+      END DO
+
+
+!     Adding URIS contribution 
+!     Local residue
+      DO a=1, eNoNw
+         lR(1,a) = lR(1,a) + (Res*DDir)*w*Nw(a)*(u(1) + up(1))
+         lR(2,a) = lR(2,a) + (Res*DDir)*w*Nw(a)*(u(2) + up(2))
+         lR(3,a) = lR(3,a) + (Res*DDir)*w*Nw(a)*(u(3) + up(3))
       END DO
 
       RETURN
@@ -680,7 +737,7 @@
 
 !     Compute viscosity based on shear-rate and chosen viscosity model
 !     The returned mu_g := (d\mu / d\gamma)
-      CALL GETVISCOSITY(eq(cEq)%dmn(cDmn), gam, mu, mu_s, mu_g)
+      CALL GET_FLUID_VISC(eq(cEq)%dmn(cDmn), gam, mu, mu_s, mu_g)
 
       IF (ISZERO(gam)) THEN
          mu_g = 0._RKIND
@@ -815,7 +872,7 @@
       END SUBROUTINE FLUID2D_M
 !####################################################################
       SUBROUTINE FLUID3D_C(vmsFlag, eNoNw, eNoNq, w, Kxi, Nw, Nq, Nwx,
-     2   Nqx, Nwxx, al, yl, bfl, lR, lK)
+     2   Nqx, Nwxx, al, yl, bfl, lR, lK, DDir)
       USE COMMOD
       USE ALLFUN
       IMPLICIT NONE
@@ -823,7 +880,7 @@
       INTEGER(KIND=IKIND), INTENT(IN) :: eNoNw, eNoNq
       REAL(KIND=RKIND), INTENT(IN) :: w, Kxi(3,3), Nw(eNoNw), Nq(eNoNq),
      2   Nwx(3,eNoNw), Nqx(3,eNoNq), Nwxx(6,eNoNw), al(tDof,eNoNw),
-     3   yl(tDof,eNoNw), bfl(3,eNoNw)
+     3   yl(tDof,eNoNw), bfl(3,eNoNw), DDir 
       REAL(KIND=RKIND), INTENT(INOUT) :: lR(dof,eNoNw),
      2   lK(dof*dof,eNoNw,eNoNw)
 
@@ -831,10 +888,15 @@
       REAL(KIND=RKIND) ctM, ctC, amd, wl, rho, tauM, kT, kS, kU, divU,
      2   gam, mu, mu_s, mu_g, u(3), ud(3), px(3), f(3), up(3), ux(3,3),
      3   uxx(3,3,3), es(3,3), es_x(3,3,3), esNx(3,eNoNw), mu_x(3), uNx,
-     4   rV(3), rS(3), updu(3,3,eNoNw), d2u2(3), upNx, NxNx, T1, T2
+     4   rV(3), rS(3), updu(3,3,eNoNw), d2u2(3), upNx, NxNx, T1, T2,Res
 
       ctM  = 1._RKIND
       ctC  = 36._RKIND
+      IF(.NOT.urisFlag) THEN
+          Res = 0._RKIND
+      ELSE
+          Res = urisRes
+      END IF
 
       rho  = eq(cEq)%dmn(cDmn)%prop(fluid_density)
       f(1) = eq(cEq)%dmn(cDmn)%prop(f_x)
@@ -983,7 +1045,7 @@
 
 !     Compute viscosity based on shear-rate and chosen viscosity model
 !     The returned mu_x := (d\mu / d\gamma)
-      CALL GETVISCOSITY(eq(cEq)%dmn(cDmn), gam, mu, mu_s, mu_g)
+      CALL GET_FLUID_VISC(eq(cEq)%dmn(cDmn), gam, mu, mu_s, mu_g)
 
       IF (ISZERO(gam)) THEN
          mu_g = 0._RKIND
@@ -995,6 +1057,10 @@
       IF (vmsFlag) THEN
 !        Stabilization parameters
          kT = 4._RKIND*(ctM/dt)**2._RKIND
+
+!        In case of unfitted RIS, compute the delta function at the quad point,
+!        add the additional value to the stabilization param 
+         kT = kT + (Res*DDir)**2._RKIND
 
          kU = u(1)*u(1)*Kxi(1,1) +u(2)*u(1)*Kxi(2,1) +u(3)*u(1)*Kxi(3,1)
      2      + u(1)*u(2)*Kxi(1,2) +u(2)*u(2)*Kxi(2,2) +u(3)*u(2)*Kxi(3,2)
@@ -1018,15 +1084,16 @@
          rS(3) = mu_x(1)*es(1,3) + mu_x(2)*es(2,3) + mu_x(3)*es(3,3)
      2         + mu*d2u2(3)
 
-         up(1) = -tauM*(rho*rV(1) + px(1) - rS(1))
-         up(2) = -tauM*(rho*rV(2) + px(2) - rS(2))
-         up(3) = -tauM*(rho*rV(3) + px(3) - rS(3))
+         up(1) = -tauM*(rho*rV(1) + px(1) - rS(1)+(Res*DDir)*u(1))
+         up(2) = -tauM*(rho*rV(2) + px(2) - rS(2)+(Res*DDir)*u(2))
+         up(3) = -tauM*(rho*rV(3) + px(3) - rS(3)+(Res*DDir)*u(3))
 
          DO a=1, eNoNw
             uNx = u(1)*Nwx(1,a) + u(2)*Nwx(2,a) + u(3)*Nwx(3,a)
 
             T1  = -rho*uNx + mu*(Nwxx(1,a) + Nwxx(2,a) + Nwxx(3,a))
      2          + mu_x(1)*Nwx(1,a) + mu_x(2)*Nwx(2,a) + mu_x(3)*Nwx(3,a)
+     3            - (Res*DDir)*Nw(a)
 
             updu(1,1,a) = mu_x(1)*Nwx(1,a) + d2u2(1)*mu_g*esNx(1,a) + T1
             updu(2,1,a) = mu_x(2)*Nwx(1,a) + d2u2(1)*mu_g*esNx(2,a)
@@ -1199,7 +1266,7 @@
 
 !     Compute viscosity based on shear-rate and chosen viscosity model
 !     The returned mu_x := (d\mu / d\gamma)
-      CALL GETVISCOSITY(eq(cEq)%dmn(cDmn), gam, mu, mu_s, mu_g)
+      CALL GET_FLUID_VISC(eq(cEq)%dmn(cDmn), gam, mu, mu_s, mu_g)
 
       IF (ISZERO(gam)) THEN
          mu_g = 0._RKIND
@@ -1293,6 +1360,9 @@
       REAL(KIND=RKIND) T1, wl, hc(nsd), udn, u(nsd)
 
       wl  = w*eq(cEq)%af*eq(cEq)%gam*dt
+
+!     Compute (u.n) for backflow stabilization
+!     (e.g. Moghadam et al. 2013 Section 2.2.1)
       udn = 0._RKIND
       IF (mvMsh) THEN
          DO i=1, nsd
@@ -1312,6 +1382,14 @@
       hc  = h*nV + udn*u
 
 !     Here the loop is started for constructing left and right hand side
+!     Add Neumann BC contributions to residual (lR) and stiffness (lK).
+!     These include both backflow stabilization and boundary pressure.
+
+!     Note, if the boundary is a coupled or resistance boundary, the
+!     boundary pressure is added to the residual here, but the coupled
+!     boundary resistance (Moghadam et al, 2013, eq. 27) is not
+!     explicitly added to the tangent here. The resistance is accounted
+!     for by the ADDBCMUL() function within the linear solver.
       IF (nsd .EQ. 2) THEN
          DO a=1, eNoN
             lR(1,a) = lR(1,a) - w*N(a)*hc(1)
@@ -1419,7 +1497,7 @@
 
 !     Compute viscosity based on shear-rate and chosen viscosity model
 !     The returned mu_g := (d\mu / d\gamma)
-      CALL GETVISCOSITY(eq(cEq)%dmn(cDmn), gam, mu, mu_s, mu_g)
+      CALL GET_FLUID_VISC(eq(cEq)%dmn(cDmn), gam, mu, mu_s, mu_g)
 
 !     sigma.n (deviatoric)
       sgmn(1) = mu*(es(1,1)*nV(1) + es(2,1)*nV(2) + es(3,1)*nV(3))
@@ -1609,7 +1687,7 @@
 
 !     Compute viscosity based on shear-rate and chosen viscosity model
 !     The returned mu_g := (d\mu / d\gamma)
-      CALL GETVISCOSITY(eq(cEq)%dmn(cDmn), gam, mu, mu_s, mu_g)
+      CALL GET_FLUID_VISC(eq(cEq)%dmn(cDmn), gam, mu, mu_s, mu_g)
 
 !     sigma.n (deviatoric)
       sgmn(1) = mu*(es(1,1)*nV(1) + es(2,1)*nV(2))
@@ -1690,55 +1768,4 @@
 
       RETURN
       END SUBROUTINE BWFLUID2D
-!####################################################################
-      SUBROUTINE GETVISCOSITY(lDmn, gamma, mu, mu_s, mu_x)
-      USE COMMOD
-      IMPLICIT NONE
-      TYPE(dmnType), INTENT(IN) :: lDmn
-      REAL(KIND=RKIND), INTENT(INOUT)  :: gamma
-      REAL(KIND=RKIND), INTENT(OUT) :: mu, mu_s, mu_x
-
-      REAL(KIND=RKIND) :: mu_i, mu_o, lam, a, n, T1, T2
-
-      SELECT CASE (lDmn%visc%viscType)
-      CASE (viscType_Const)
-         mu   = lDmn%visc%mu_i
-         mu_s = mu
-         mu_x = 0._RKIND
-
-      CASE (viscType_CY)
-         mu_i = lDmn%visc%mu_i
-         mu_o = lDmn%visc%mu_o
-         lam  = lDmn%visc%lam
-         a    = lDmn%visc%a
-         n    = lDmn%visc%n
-
-         T1   = 1._RKIND + (lam*gamma)**a
-         T2   = T1**((n-1._RKIND)/a)
-         mu   = mu_i + (mu_o-mu_i)*T2
-         mu_s = mu_i
-
-         T1   = T2/T1
-         T2   = lam**a * gamma**(a-1._RKIND) * T1
-         mu_x = (mu_o-mu_i)*(n-1._RKIND)*T2
-
-      CASE (viscType_Cass)
-         mu_i = lDmn%visc%mu_i
-         mu_o = lDmn%visc%mu_o
-         lam  = lDmn%visc%lam
-
-         IF (gamma .LT. lam) THEN
-            mu_o  = mu_o/SQRT(lam)
-            gamma = lam
-         ELSE
-            mu_o = mu_o/SQRT(gamma)
-         END IF
-         mu   = (mu_i + mu_o) * (mu_i + mu_o)
-         mu_s = mu_i*mu_i
-         mu_x = 2._RKIND*mu_o*(mu_o + mu_i)/gamma
-
-      END SELECT
-
-      RETURN
-      END SUBROUTINE GETVISCOSITY
 !####################################################################

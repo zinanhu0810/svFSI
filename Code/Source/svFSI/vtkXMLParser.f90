@@ -441,6 +441,7 @@
 
          do iatt=1, nPieceAtts
             vtk%pcAtt(iatt)%pName  = ""
+            vtk%pcAtt(iatt)%pName  = ""
             vtk%pcAtt(iatt)%ptClField(:) = ""
             vtk%pcAtt(iatt)%ptClFieldName(:) = ""
             vtk%pcAtt(iatt)%n = 0
@@ -487,6 +488,8 @@
             access="stream",convert="big_endian")
             vtk%isBinApp = .true.
             iPos = 1
+         else
+            vtk%isBinApp = .false.
          end if
          vtk%dataFormat = trim(stmp)
          if ( debug ) write(stdout,ftab2) &
@@ -1281,9 +1284,10 @@
             istat=-1; return
          end if
 
-         if ( nPolys.lt.1 ) then
+         if ( nPolys.lt.1 .and. nLines.lt.1) then
             write(stdout,ftab4) &
-            "ERROR: VTK Piece element NumberOfPolys not defined.."
+            "ERROR: VTK Piece elements NumberOfPolys and "//&
+            "NumberOfLines are not defined.."
             istat=-1; return
          end if
 
@@ -1306,17 +1310,33 @@
             end if
 
          case ("CellData")
-            if ( nPolys.gt.0 .and. dPtr%nComps.eq.0 ) then
-               dPtr%nComps = getNumComps(vtk,dataArr,nPolys)
-               if ( .not.vtk%isBinApp ) dPtr%nComps = 1
-            end if
-            dPtr%nVals = nPolys
-            dPtr%nElms = nPolys * dPtr%nComps
-            if ( debug ) then
-               write(stdout,ftab4) &
-                  "nPolys "// trim(STR(dPtr%nVals)) //&
-                  "; nComps "// trim(STR(dPtr%nComps)) //&
-                  "; nElems "// trim(STR(dPtr%nElms))
+            if (nPolys.gt.0) then
+               if (dPtr%nComps.eq.0 ) then
+                  dPtr%nComps = getNumComps(vtk,dataArr,nPolys)
+                  if ( .not.vtk%isBinApp ) dPtr%nComps = 1
+               end if
+               dPtr%nVals = nPolys
+               dPtr%nElms = nPolys * dPtr%nComps
+               if ( debug ) then
+                  write(stdout,ftab4) &
+                     "nPolys "// trim(STR(dPtr%nVals)) //&
+                     "; nComps "// trim(STR(dPtr%nComps)) //&
+                     "; nElems "// trim(STR(dPtr%nElms))
+               end if
+
+            else if (nLines.gt.0) then
+               if (dPtr%nComps.eq.0 ) then
+                  dPtr%nComps = getNumComps(vtk,dataArr,nLines)
+                  if ( .not.vtk%isBinApp ) dPtr%nComps = 1
+               end if
+               dPtr%nVals = nLines
+               dPtr%nElms = nLines * dPtr%nComps
+               if ( debug ) then
+                  write(stdout,ftab4) &
+                     "nLines "// trim(STR(dPtr%nVals)) //&
+                     "; nComps "// trim(STR(dPtr%nComps)) //&
+                     "; nElems "// trim(STR(dPtr%nElms))
+               end if
             end if
 
          case ("Points")
@@ -1860,10 +1880,11 @@
                      do
                         read(vtk%fid,pos=iPos,end=001) c
                         iPos = iPos + 1
-                        if ( present(ePos) .and. iPos.ge.ePos) &
-                        then
-                           strng = ''
-                           return
+                        if (present(ePos)) then
+                           if (iPos.ge.ePos) then
+                              strng = ''
+                              return
+                           end if
                         end if
                         cnt = cnt+1
                         strng(cnt:cnt) = c
@@ -1889,9 +1910,11 @@
                strng = ''
                read(vtk%fid,'(A)',end=001) strng
                iPos = iPos+1
-               if ( present(ePos) .and. iPos.ge.ePos ) then
-                  strng = ''
-                  return
+               if (present(ePos)) then
+                  if (iPos .ge. ePos) then
+                     strng = ''
+                     return
+                  end if
                end if
             end if
             strng = adjustl(strng)
@@ -2024,11 +2047,13 @@
             ne = vtk%pcElms%nCells
          else if ( vtk%pcElms%nPolys.gt.0 ) then
             ne = vtk%pcElms%nPolys
+         else if ( vtk%pcElms%nLines.gt.0 ) then
+            ne = vtk%pcElms%nLines
          end if
 
          if ( ne.eq.0 ) then
             write(stdout,ftab4) &
-               "ERROR: could not find CELLS or POLYS attributes"
+               "ERROR: could not find CELLS, POLYS, or LINES attributes"
             istat=-1; return
          end if
 
@@ -2047,9 +2072,11 @@
             iatt = 9
          else if (vtk%pcElms%nPolys.gt.0 ) then ! nPolys !
             iatt = 8
+         else if (vtk%pcElms%nLines.gt.0 ) then ! nLines !
+            iatt = 6
          else
             write(stdout,ftab4) &
-               "ERROR: could not find CELLS or POLYS attributes"
+               "ERROR: could not find CELLS, POLYS, or LINES attributes"
             istat=-1; return
          end if
 
@@ -2145,9 +2172,11 @@
             iatt = 9
          else if (vtk%pcElms%nPolys.gt.0 ) then ! nPolys !
             iatt = 8
+         else if (vtk%pcElms%nLines.gt.0 ) then ! nLines !
+            iatt = 6
          else
             write(stdout,ftab4) &
-               "ERROR: could not find CELLS or POLYS attributes"
+               "ERROR: could not find CELLS, POLYS, or LINES attributes"
             istat=-1; return
          end if
 
@@ -2185,7 +2214,7 @@
          if ( i.gt.vtk%pcAtt(iatt)%n ) then
             write(stdout,ftab4) &
                "ERROR: could not find connectivity in "// &
-               "Cells or Polys attributes"
+               "Cells, Polys, or Lines attributes"
             istat=-1; return
          end if
 
@@ -2580,6 +2609,7 @@
          iatt = 2
          n    = size(u)
 
+         flag = .false.
          do i=1, vtk%pcAtt(iatt)%n
             if ( trim(vtk%pcAtt(iatt)%dataArr(i)%dName) .eq. &
                 trim(kwrd) ) then
@@ -3602,40 +3632,80 @@
                end do
             end if
          case("PolyData")
-            iatt = 8
-            allocate(ioff(vtk%pcAtt(iatt)%n))
-            ioff = 0
-            if ( vtk%pcElms%nPolys.eq.0 ) then
-               vtk%pcElms%nPolys = ne
-               vtk%pcAtt(iatt)%n = 2
-               vtk%pcAtt(iatt)%pName = "Polys"
-               vtk%pcAtt(iatt)%dataArr(1)%nVals  = ne*eNoN
-               vtk%pcAtt(iatt)%dataArr(2)%nVals  = ne
-               do i=1, vtk%pcAtt(iatt)%n
-                  n = vtk%pcAtt(iatt)%dataArr(i)%nVals
-                  vtk%pcAtt(iatt)%dataArr(i)%nElms = n
-                  allocate(vtk%pcAtt(iatt)%dataArr(i)%iarr(n))
-               end do
+!           Write line data for 2D surfaces
+            if ( vtkType.eq.3 .or. vtkType.eq.21 ) then
+               iatt = 6
+               allocate(ioff(vtk%pcAtt(iatt)%n))
+               ioff = 0
+               if ( vtk%pcElms%nLines.eq.0 ) then
+                  vtk%pcElms%nLines = ne
+                  vtk%pcAtt(iatt)%n = 2
+                  vtk%pcAtt(iatt)%pName = "Lines"
+                  vtk%pcAtt(iatt)%dataArr(1)%nVals  = ne*eNoN
+                  vtk%pcAtt(iatt)%dataArr(2)%nVals  = ne
+                  do i=1, vtk%pcAtt(iatt)%n
+                     n = vtk%pcAtt(iatt)%dataArr(i)%nVals
+                     vtk%pcAtt(iatt)%dataArr(i)%nElms = n
+                     allocate(vtk%pcAtt(iatt)%dataArr(i)%iarr(n))
+                  end do
+               else
+                  vtk%pcElms%nLines = vtk%pcElms%nLines + ne
+                  vtk%pcAtt(iatt)%dataArr(1)%nVals = ne*eNoN + &
+                     vtk%pcAtt(iatt)%dataArr(1)%nVals
+                  vtk%pcAtt(iatt)%dataArr(2)%nVals = ne + &
+                     vtk%pcAtt(iatt)%dataArr(2)%nVals
+                  do i=1, vtk%pcAtt(iatt)%n
+                     n = vtk%pcAtt(iatt)%dataArr(i)%nElms
+                     ioff(i) = n
+                     allocate(tmpI(n))
+                     tmpI = vtk%pcAtt(iatt)%dataArr(i)%iarr
+                     deallocate(vtk%pcAtt(iatt)%dataArr(i)%iarr)
+                     n = vtk%pcAtt(iatt)%dataArr(i)%nVals
+                     allocate(vtk%pcAtt(iatt)%dataArr(i)%iarr(n))
+                     n = vtk%pcAtt(iatt)%dataArr(i)%nElms
+                     vtk%pcAtt(iatt)%dataArr(i)%iarr(1:n) = tmpI
+                     n = vtk%pcAtt(iatt)%dataArr(i)%nVals
+                     vtk%pcAtt(iatt)%dataArr(i)%nElms = n
+                     deallocate(tmpI)
+                  end do
+               end if
             else
-               vtk%pcElms%nPolys = vtk%pcElms%nPolys + ne
-               vtk%pcAtt(iatt)%dataArr(1)%nVals = ne*eNoN + &
-                  vtk%pcAtt(iatt)%dataArr(1)%nVals
-               vtk%pcAtt(iatt)%dataArr(2)%nVals = ne + &
-                  vtk%pcAtt(iatt)%dataArr(2)%nVals
-               do i=1, vtk%pcAtt(iatt)%n
-                  n = vtk%pcAtt(iatt)%dataArr(i)%nElms
-                  ioff(i) = n
-                  allocate(tmpI(n))
-                  tmpI = vtk%pcAtt(iatt)%dataArr(i)%iarr
-                  deallocate(vtk%pcAtt(iatt)%dataArr(i)%iarr)
-                  n = vtk%pcAtt(iatt)%dataArr(i)%nVals
-                  allocate(vtk%pcAtt(iatt)%dataArr(i)%iarr(n))
-                  n = vtk%pcAtt(iatt)%dataArr(i)%nElms
-                  vtk%pcAtt(iatt)%dataArr(i)%iarr(1:n) = tmpI
-                  n = vtk%pcAtt(iatt)%dataArr(i)%nVals
-                  vtk%pcAtt(iatt)%dataArr(i)%nElms = n
-                  deallocate(tmpI)
-               end do
+!           Write polygonal data for 3D surfaces
+               iatt = 8
+               allocate(ioff(vtk%pcAtt(iatt)%n))
+               ioff = 0
+               if ( vtk%pcElms%nPolys.eq.0 ) then
+                  vtk%pcElms%nPolys = ne
+                  vtk%pcAtt(iatt)%n = 2
+                  vtk%pcAtt(iatt)%pName = "Polys"
+                  vtk%pcAtt(iatt)%dataArr(1)%nVals  = ne*eNoN
+                  vtk%pcAtt(iatt)%dataArr(2)%nVals  = ne
+                  do i=1, vtk%pcAtt(iatt)%n
+                     n = vtk%pcAtt(iatt)%dataArr(i)%nVals
+                     vtk%pcAtt(iatt)%dataArr(i)%nElms = n
+                     allocate(vtk%pcAtt(iatt)%dataArr(i)%iarr(n))
+                  end do
+               else
+                  vtk%pcElms%nPolys = vtk%pcElms%nPolys + ne
+                  vtk%pcAtt(iatt)%dataArr(1)%nVals = ne*eNoN + &
+                     vtk%pcAtt(iatt)%dataArr(1)%nVals
+                  vtk%pcAtt(iatt)%dataArr(2)%nVals = ne + &
+                     vtk%pcAtt(iatt)%dataArr(2)%nVals
+                  do i=1, vtk%pcAtt(iatt)%n
+                     n = vtk%pcAtt(iatt)%dataArr(i)%nElms
+                     ioff(i) = n
+                     allocate(tmpI(n))
+                     tmpI = vtk%pcAtt(iatt)%dataArr(i)%iarr
+                     deallocate(vtk%pcAtt(iatt)%dataArr(i)%iarr)
+                     n = vtk%pcAtt(iatt)%dataArr(i)%nVals
+                     allocate(vtk%pcAtt(iatt)%dataArr(i)%iarr(n))
+                     n = vtk%pcAtt(iatt)%dataArr(i)%nElms
+                     vtk%pcAtt(iatt)%dataArr(i)%iarr(1:n) = tmpI
+                     n = vtk%pcAtt(iatt)%dataArr(i)%nVals
+                     vtk%pcAtt(iatt)%dataArr(i)%nElms = n
+                     deallocate(tmpI)
+                  end do
+               end if
             end if
          case default
             write(stdout,ftab4) &

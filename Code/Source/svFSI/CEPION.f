@@ -199,15 +199,15 @@
 
 !        Compute fiber stretch at all the nodes
          DO iM=1, nMsh
-            IF (msh(iM)%nFn .NE. 0) THEN
-               ALLOCATE(sA(msh(iM)%nNo))
-               sA = 0._RKIND
-               CALL FIBSTRETCH(stEq, msh(iM), Dg, sA)
+            IF (msh(iM)%fib%nFn .NE. 0) THEN
+               ALLOCATE(sF(1,msh(iM)%nNo))
+               sF = 0._RKIND
+               CALL FIBSTRETCH(stEq, msh(iM), Dg, sF)
                DO a=1, msh(iM)%nNo
                   Ac = msh(iM)%gN(a)
-                  I4f(Ac) = sA(a)
+                  I4f(Ac) = sF(1,a)
                END DO
-               DEALLOCATE(sA)
+               DEALLOCATE(sF)
             END IF
          END DO
       END IF

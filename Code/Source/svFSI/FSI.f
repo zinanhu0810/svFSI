@@ -1,4 +1,4 @@
-
+!
 ! Copyright (c) Stanford University, The Regents of the University of
 !               California, and others.
 !
@@ -45,19 +45,20 @@
      2   Dg(tDof,tnNo)
 
       LOGICAL :: vmsStab
-      INTEGER(KIND=IKIND) a, e, g, l, Ac, eNoN, cPhys, iFn, nFn, cNE
-      REAL(KIND=RKIND) w, Jac, ksix(nsd,nsd)
+      INTEGER(KIND=IKIND) a, e, g, l, Ac, eNoN, cPhys, iFn, nFn,iUris
+      REAL(KIND=RKIND) w, Jac, ksix(nsd,nsd),distSrf(nUris)
       TYPE(fsType) :: fs(2)
 
-      INTEGER(KIND=IKIND), ALLOCATABLE :: ptr(:),lIEN(:)
+      INTEGER(KIND=IKIND), ALLOCATABLE :: ptr(:)
       REAL(KIND=RKIND), ALLOCATABLE :: xl(:,:), al(:,:), yl(:,:),
      2   dl(:,:), bfl(:,:), fN(:,:), pS0l(:,:), pSl(:), tmXl(:),
      3   ya_l(:), lR(:,:), lK(:,:,:), lKd(:,:,:)
       REAL(KIND=RKIND), ALLOCATABLE :: xwl(:,:), xql(:,:), Nwx(:,:),
      2   Nwxx(:,:), Nqx(:,:)
+      REAL(KIND=RKIND)  xq(nsd), Res, DDir, DDirTmp
 
       eNoN = lM%eNoN
-      nFn  = lM%nFn
+      nFn  = lM%fib%nFn
       IF (nFn .EQ. 0) nFn = 1
 
       IF (lM%nFs .EQ. 1) THEN
@@ -65,6 +66,8 @@
       ELSE
          vmsStab = .FALSE.
       END IF
+
+      DDir = 0._RKIND
 
 !     l = 3, if nsd==2 ; else 6;
       l = nsymd
@@ -74,39 +77,10 @@
      3   pSl(nsymd), tmXl(eNoN), ya_l(eNoN), lR(dof,eNoN),
      4   lK(dof*dof,eNoN,eNoN), lKd(dof*nsd,eNoN,eNoN))
 
-      
-
 !     Loop over all elements of mesh
       DO e=1, lM%nEl
-         cNE = e
-         lIEN = lM%IEN(1:eNoN,e)
-
-!         cNE = 0._IKIND
-!        lIEN = 1._IKIND
-         
          cDmn  = DOMAIN(lM, cEq, e)
          cPhys = eq(cEq)%dmn(cDmn)%phys
-
-!         IF (cNE .EQ. 1) THEN
-!            PRINT*,eq(cEq)%dmn(cDmn)%phys .EQ. phys_struct
-!            PRINT*,eq(cEq)%dmn(cDmn)%phys .EQ. phys_FSI
-!            PRINT*,eq(cEq)%dmn(cDmn)%phys .EQ. phys_fluid
-!         END IF
-
-         IF (cPhys .EQ. phys_struct) THEN
-            cNE = e
-            lIEN = lM%IEN(1:eNoN,e)
-!            IF (cNE .EQ. 1) PRINT*, lM%IEN(1:eNoN,e)
-!            IF (cNE .EQ. 1) THEN
-!               PRINT*, lM%nEl
-!               PRINT*,"length of IEN", SIZE(lM%IEN, dim=1)
-!               PRINT*,"length of IEN", SIZE(lM%IEN, dim=2)
-!               PRINT*, eq(cEq)%dmn(cDmn)%phys .EQ. phys_struct
-!            END IF
-            
-         END IF 
-
-         
          IF ((cPhys .NE. phys_fluid)  .AND.
      2       (cPhys .NE. phys_lElas)  .AND.
      3       (cPhys .NE. phys_struct) .AND.
@@ -116,7 +90,6 @@
          IF (lM%eType .EQ. eType_NRB) CALL NRBNNX(lM, e)
 
 !        Create local copies
-         fN   = 0._RKIND
          pS0l = 0._RKIND
          ya_l = 0._RKIND
          DO a=1, eNoN
@@ -127,11 +100,6 @@
             yl(:,a)  = Yg(:,Ac)
             dl(:,a)  = Dg(:,Ac)
             bfl(:,a) = Bf(:,Ac)
-            IF (ALLOCATED(lM%fN)) THEN
-               DO iFn=1, nFn
-                  fN(:,iFn) = lM%fN((iFn-1)*nsd+1:iFn*nsd,e)
-               END DO
-            END IF
             IF (ALLOCATED(pS0)) pS0l(:,a) = pS0(:,Ac)
             IF (ecCpld) THEN
                IF (ALLOCATED(lM%tmX)) THEN
@@ -145,7 +113,8 @@
             END IF
          END DO
 
-!        For FSI, fluid domain should be in the current configuration
+!        For FSI, fluid domain should be in the current configuration,
+!        so add fluid mesh displacements to point coordinates
          IF (cPhys .EQ. phys_fluid) THEN
             xl(:,:) = xl(:,:) + dl(nsd+2:2*nsd+1,:)
          END IF
@@ -186,12 +155,39 @@
             END IF
             w = fs(1)%w(g) * Jac
 
+!--         Plot the coordinates of the quad point in the current configuration 
+            IF(urisFlag) THEN 
+               distSrf = 0._RKIND
+               DO a=1, eNoN 
+                  Ac = lM%IEN(a,e)
+                  DO iUris=1, nUris
+                     distSrf(iUris) = distSrf(iUris) + 
+     2                  fs(1)%N(a,g)*ABS(uris(iUris)%sdf(Ac))
+                  END DO
+               END DO 
+
+               DDir = 0._RKIND
+               DO iUris=1, nUris
+                  IF (distSrf(iUris).LE.uris(iUris)%sdf_deps) THEN
+                      DDirTmp = (1+COS(PI*distSrf(iUris)/
+     2                      uris(iUris)%sdf_deps))/
+     3                      (2*uris(iUris)%sdf_deps**2)
+                      IF (DDirTmp.GT.DDir) DDir = DDirTmp
+                  END IF
+               END DO
+
+               IF(.NOT.urisActFlag) DDir = 0._RKIND
+            END IF
+!--
+!           Get fiber directions at the integration point
+            CALL GET_FIBN(lM, lM%fib, e, g, eNoN, fs(1)%N(:,g), fN)
+
             IF (nsd .EQ. 3) THEN
                SELECT CASE (cPhys)
                CASE (phys_fluid)
                   CALL FLUID3D_M(vmsStab, fs(1)%eNoN, fs(2)%eNoN, w,
      2               ksix, fs(1)%N(:,g), fs(2)%N(:,g), Nwx, Nqx, Nwxx,
-     3               al, yl, bfl, lR, lK)
+     3               al, yl, bfl, lR, lK, DDir)
 
                CASE (phys_lElas)
                   CALL LELAS3D(fs(1)%eNoN, w, fs(1)%N(:,g), Nwx, al, dl,
@@ -199,13 +195,12 @@
 
                CASE (phys_struct)
                   CALL STRUCT3D(fs(1)%eNoN, nFn, w, fs(1)%N(:,g), Nwx,
-     2               al, yl, dl, bfl, fN, pS0l, pSl, tmXl, ya_l, lR, lK,
-     3               lIEN, cNE)
+     2               al, yl, dl, bfl, fN, pS0l, pSl, tmXl, ya_l, lR, lK)
 
                CASE (phys_ustruct)
                   CALL USTRUCT3D_M(vmsStab, fs(1)%eNoN, fs(2)%eNoN, nFn,
      2               w, Jac, fs(1)%N(:,g), fs(2)%N(:,g), Nwx, al, yl,
-     3               dl, bfl, fN, tmXl, ya_l, lR, lK, lKd, lIEN, cNE)
+     3               dl, bfl, fN, tmXl, ya_l, lR, lK, lKd)
 
                END SELECT
 
@@ -222,13 +217,12 @@
 
                CASE (phys_struct)
                   CALL STRUCT2D(fs(1)%eNoN, nFn, w, fs(1)%N(:,g), Nwx,
-     2               al, yl, dl, bfl, fN, pS0l, pSl, tmXl, ya_l, lR, lK,
-     3               lIEN, cNE)
+     2               al, yl, dl, bfl, fN, pS0l, pSl, tmXl, ya_l, lR, lK)
 
                CASE (phys_ustruct)
                   CALL USTRUCT2D_M(vmsStab, fs(1)%eNoN, fs(2)%eNoN, nFn,
      2               w, Jac, fs(1)%N(:,g), fs(2)%N(:,g), Nwx, al, yl,
-     3               dl, bfl, fN, tmXl, ya_l, lR, lK, lKd, lIEN, cNE)
+     3               dl, bfl, fN, tmXl, ya_l, lR, lK, lKd)
 
                END SELECT
             END IF
@@ -257,7 +251,7 @@
                CASE (phys_fluid)
                   CALL FLUID3D_C(vmsStab, fs(1)%eNoN, fs(2)%eNoN, w,
      2               ksix, fs(1)%N(:,g), fs(2)%N(:,g), Nwx, Nqx, Nwxx,
-     3               al, yl, bfl, lR, lK)
+     3               al, yl, bfl, lR, lK, DDir)
 
                CASE (phys_ustruct)
                   CALL USTRUCT3D_C(vmsStab, fs(1)%eNoN, fs(2)%eNoN, w,
@@ -294,12 +288,16 @@
                CALL USTRUCT_DOASSEM(eNoN, ptr, lKd, lK, lR)
             ELSE
                CALL DOASSEM(eNoN, ptr, lK, lR)
+               IF( risFlag) THEN 
+                   IF (.NOT. ALL(RIS%clsFlg)) THEN
+                      CALL DOASSEM_RIS(eNoN, ptr, lK, lR)
+                   END IF
+               END IF
             END IF
 #ifdef WITH_TRILINOS
          END IF
 #endif
       END DO ! e: loop
-
       DEALLOCATE(ptr, xl, al, yl, dl, bfl, fN, pS0l, pSl, tmXl, ya_l,
      2    lR, lK, lKd)
 

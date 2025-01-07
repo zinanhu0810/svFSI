@@ -38,14 +38,12 @@
 
 !     Compute 2nd Piola-Kirchhoff stress and material stiffness tensors
 !     including both dilational and isochoric components
-      SUBROUTINE GETPK2CC(lDmn, F, nfd, fl, tmX, ya, S, Dm, eNoN, lIEN, 
-     2   cNE)
+      SUBROUTINE GETPK2CC(lDmn, F, nfd, fl, tmX, ya, S, Dm)
       USE MATFUN
       USE COMMOD
       IMPLICIT NONE
       TYPE(dmnType), INTENT(IN) :: lDmn
-      INTEGER(KIND=IKIND), INTENT(IN) :: nfd, eNoN, cNE
-      INTEGER(KIND=IKIND), INTENT(IN) :: lIEN(eNoN)
+      INTEGER(KIND=IKIND), INTENT(IN) :: nfd
       REAL(KIND=RKIND), INTENT(IN) :: F(nsd,nsd), fl(nsd,nfd), tmX, ya
       REAL(KIND=RKIND), INTENT(OUT) :: S(nsd,nsd), Dm(nsymd,nsymd)
 
@@ -58,7 +56,7 @@
 !     Guccione
       REAL(KIND=RKIND) :: QQ, Rm(nsd,nsd), Es(nsd,nsd), RmRm(nsd,nsd,6)
 !     HGO/HO model
-      REAL(KIND=RKIND) :: Eff, Ess, Efs, kap, c4f, c4s, dc4f, dc4s,
+      REAL(KIND=RKIND) :: Eff, Ess, Efs, kap, c4f, c4s, dc4f, dc4s, fds,
      2   Hff(nsd,nsd), Hss(nsd,nsd), Hfs(nsd,nsd)
 !     Active strain for electromechanics
       REAL(KIND=RKIND) :: Fe(nsd,nsd), Fa(nsd,nsd), Fai(nsd,nsd)
@@ -72,7 +70,7 @@
       Kp   = stM%Kpen
 
 !     Fiber-reinforced stress
-      CALL GET_FIB_STRESS(stM%Tf, Tfa, eNoN, lIEN, cNE)
+      CALL GET_FIB_STRESS(stM%Tf, Tfa)
       Tsa = Tfa*stM%Tf%eta_s
 
 !     Electromechanics coupling - active stress
@@ -141,17 +139,6 @@
 
 !        Fiber reinforcement/active stress
          Sb = Sb + Tfa*MAT_DYADPROD(fl(:,1), fl(:,1), nsd)
-
-!         IF (cNE .EQ. 1) THEN
-!            PRINT*, "The  FIB STRESS AT ELEMENT  1 IS", Tfa
-!            PRINT*,  MAT_DYADPROD(fl(:,1), fl(:,1), nsd)
-!         ENDIF
-
-!         IF (cNE .EQ. 1893) THEN
-!            PRINT*, "The  FIB STRESS AT ELEMENT 1893 IS", Tfa
-!            PRINT*,  MAT_DYADPROD(fl(:,1), fl(:,1), nsd)
-!         ENDIF
-
 
          r1 = J2d*MAT_DDOT(C, Sb, nsd) / nd
          S  = J2d*Sb - r1*Ci
@@ -368,6 +355,7 @@
          Inv4 = J2d*NORM(fl(:,1), MATMUL(C, fl(:,1)))
          Inv6 = J2d*NORM(fl(:,2), MATMUL(C, fl(:,2)))
          Inv8 = J2d*NORM(fl(:,1), MATMUL(C, fl(:,2)))
+         fds  = NORM(fl(:,1), fl(:,2))
 
          Eff  = Inv4 - 1._RKIND
          Ess  = Inv6 - 1._RKIND
@@ -389,11 +377,12 @@ c     2      (EXP(stM%khs*Ess) + EXP(-stM%khs*Ess) + 2.0_RKIND)
          g1   = stM%a * EXP(stM%b*(Inv1-3._RKIND))
          g2   = 2._RKIND * stM%afs * EXP(stM%bfs*Efs*Efs)
          Hfs  = MAT_SYMMPROD(fl(:,1), fl(:,2), nsd)
-         Sb   = g1*IDm + g2*Efs*Hfs
+         Sb   = g1*IDm + g2*Efs*fds*Hfs
 
 !        Isotropic + fiber-sheet interaction stiffness
          g1   = g1 * 2._RKIND*J4d*stM%b
          g2   = g2 * 2._RKIND*J4d*(1._RKIND + 2._RKIND*stM%bfs*Efs*Efs)
+         g2   = g2 * fds * fds
          CCb  = g1 * TEN_DYADPROD(IDm, IDm, nsd) +
      2          g2 * TEN_DYADPROD(Hfs, Hfs, nsd)
 
@@ -451,6 +440,7 @@ c     2      (EXP(stM%khs*Ess) + EXP(-stM%khs*Ess) + 2.0_RKIND)
          Inv4 = NORM(fl(:,1), MATMUL(C, fl(:,1)))
          Inv6 = NORM(fl(:,2), MATMUL(C, fl(:,2)))
          Inv8 = NORM(fl(:,1), MATMUL(C, fl(:,2)))
+         fds  = NORM(fl(:,1), fl(:,2))
 
          Eff  = Inv4 - 1._RKIND
          Ess  = Inv6 - 1._RKIND
@@ -497,9 +487,10 @@ c     2      (EXP(stM%khs*Ess) + EXP(-stM%khs*Ess) + 2.0_RKIND)
 !        Fiber-sheet interaction terms
          g1   = 2._RKIND * stM%afs * EXP(stM%bfs*Efs*Efs)
          Hfs  = MAT_SYMMPROD(fl(:,1), fl(:,2), nsd)
-         S    = S + (g1*Efs*Hfs)
+         S    = S + (g1*Efs*fds*Hfs)
 
          g1   = g1 * 2._RKIND*(1._RKIND + 2._RKIND*stM%bfs*Efs*Efs)
+         g1   = g1 * fds * fds
          CC   = CC + (g1*TEN_DYADPROD(Hfs, Hfs, nsd))
 
 !        Fiber-fiber interaction stress + additional reinforcement (Tfa)
@@ -578,14 +569,12 @@ c     2      (EXP(stM%khs*Ess) + EXP(-stM%khs*Ess) + 2.0_RKIND)
 !####################################################################
 !     Compute isochoric (deviatoric) component of 2nd Piola-Kirchhoff
 !     stress and material stiffness tensors
-      SUBROUTINE GETPK2CCdev(lDmn, F, nfd, fl, tmX, ya, S, Dm, Ja,
-     2     eNoN,lIEN, cNE)
+      SUBROUTINE GETPK2CCdev(lDmn, F, nfd, fl, tmX, ya, S, Dm, Ja)
       USE MATFUN
       USE COMMOD
       IMPLICIT NONE
       TYPE(dmnType), INTENT(IN) :: lDmn
-      INTEGER(KIND=IKIND), INTENT(IN) :: nfd, eNoN, cNE
-      INTEGER(KIND=IKIND), INTENT(IN) :: lIEN(eNoN)
+      INTEGER(KIND=IKIND), INTENT(IN) :: nfd
       REAL(KIND=RKIND), INTENT(IN) :: F(nsd,nsd), fl(nsd,nfd), tmX, ya
       REAL(KIND=RKIND), INTENT(OUT) :: S(nsd,nsd), Dm(nsymd,nsymd), Ja
 
@@ -598,7 +587,7 @@ c     2      (EXP(stM%khs*Ess) + EXP(-stM%khs*Ess) + 2.0_RKIND)
       ! Guccione !
       REAL(KIND=RKIND) :: QQ, Rm(nsd,nsd), Es(nsd,nsd), RmRm(nsd,nsd,6)
       ! HGO, HO !
-      REAL(KIND=RKIND) :: Eff, Ess, Efs, kap, c4f, c4s, dc4f, dc4s,
+      REAL(KIND=RKIND) :: Eff, Ess, Efs, kap, c4f, c4s, dc4f, dc4s, fds,
      2   Hff(nsd,nsd), Hss(nsd,nsd), Hfs(nsd,nsd)
 !     Active strain for electromechanics
       REAL(KIND=RKIND) :: Fe(nsd,nsd), Fa(nsd,nsd), Fai(nsd,nsd)
@@ -611,7 +600,7 @@ c     2      (EXP(stM%khs*Ess) + EXP(-stM%khs*Ess) + 2.0_RKIND)
       nd   = REAL(nsd, KIND=RKIND)
 
 !     Fiber-reinforced stress
-      CALL GET_FIB_STRESS(stM%Tf, Tfa, eNoN, lIEN, cNE)
+      CALL GET_FIB_STRESS(stM%Tf, Tfa)
       Tsa = Tfa*stM%Tf%eta_s
 
 !     Electromechanics coupling - active stress
@@ -857,6 +846,7 @@ c     2      (EXP(stM%khs*Ess) + EXP(-stM%khs*Ess) + 2.0_RKIND)
          Inv4 = J2d*NORM(fl(:,1), MATMUL(C, fl(:,1)))
          Inv6 = J2d*NORM(fl(:,2), MATMUL(C, fl(:,2)))
          Inv8 = J2d*NORM(fl(:,1), MATMUL(C, fl(:,2)))
+         fds  = NORM(fl(:,1), fl(:,2))
 
          Eff  = Inv4 - 1._RKIND
          Ess  = Inv6 - 1._RKIND
@@ -878,11 +868,12 @@ c     2      (EXP(stM%khs*Ess) + EXP(-stM%khs*Ess) + 2.0_RKIND)
          g1   = stM%a * EXP(stM%b*(Inv1-3._RKIND))
          g2   = 2._RKIND * stM%afs * EXP(stM%bfs*Efs*Efs)
          Hfs  = MAT_SYMMPROD(fl(:,1), fl(:,2), nsd)
-         Sb   = g1*IDm + g2*Efs*Hfs
+         Sb   = g1*IDm + g2*Efs*fds*Hfs
 
 !        Isotropic + fiber-sheet interaction stiffness
          g1   = g1 * 2._RKIND*J4d*stM%b
          g2   = g2 * 2._RKIND*J4d*(1._RKIND + 2._RKIND*stM%bfs*Efs*Efs)
+         g2   = g2 * fds * fds
          CCb  = g1 * TEN_DYADPROD(IDm, IDm, nsd) +
      2          g2 * TEN_DYADPROD(Hfs, Hfs, nsd)
 
@@ -937,6 +928,7 @@ c     2      (EXP(stM%khs*Ess) + EXP(-stM%khs*Ess) + 2.0_RKIND)
          Inv4 = NORM(fl(:,1), MATMUL(C, fl(:,1)))
          Inv6 = NORM(fl(:,2), MATMUL(C, fl(:,2)))
          Inv8 = NORM(fl(:,1), MATMUL(C, fl(:,2)))
+         fds  = NORM(fl(:,1), fl(:,2))
 
          Eff  = Inv4 - 1._RKIND
          Ess  = Inv6 - 1._RKIND
@@ -978,9 +970,10 @@ c     2      (EXP(stM%khs*Ess) + EXP(-stM%khs*Ess) + 2.0_RKIND)
 !        Fiber-sheet interaction terms
          g1   = 2._RKIND * stM%afs * EXP(stM%bfs*Efs*Efs)
          Hfs  = MAT_SYMMPROD(fl(:,1), fl(:,2), nsd)
-         S    = S + (g1*Efs*Hfs)
+         S    = S + (g1*Efs*fds*Hfs)
 
          g1   = g1 * 2._RKIND*(1._RKIND + 2._RKIND*stM%bfs*Efs*Efs)
+         g1   = g1 * fds * fds
          CC   = CC + (g1*TEN_DYADPROD(Hfs, Hfs, nsd))
 
 !        Fiber-fiber interaction stress + additional reinforcement (Tfa)
@@ -1662,80 +1655,19 @@ c     2      (EXP(stM%khs*Ess) + EXP(-stM%khs*Ess) + 2.0_RKIND)
       END SUBROUTINE CCTOVOIGT
 !####################################################################
 !     Compute additional fiber-reinforcement stress
-      SUBROUTINE GET_FIB_STRESS(Tfl, g, eNoN, lIEN, cNE)
+      SUBROUTINE GET_FIB_STRESS(Tfl, g)
       USE COMMOD
       IMPLICIT NONE
       TYPE(fibStrsType), INTENT(IN) :: Tfl
       REAL(KIND=RKIND), INTENT(OUT) :: g
-      INTEGER(KIND=IKIND), INTENT(IN) :: eNoN, cNE
-      INTEGER(KIND=IKIND), INTENT(IN) :: lIEN(eNoN)
-      INTEGER(KIND=IKIND) a, ta, increT,curr_time
 
       REAL(KIND=RKIND) rtmp
 
       g = 0._RKIND
-      ta = 0
-
       IF (BTEST(Tfl%fType, bType_std)) THEN
          g = Tfl%g
       ELSE IF (BTEST(Tfl%fType, bType_ustd)) THEN
          CALL IFFT(Tfl%gt, g, rtmp)
-      ELSE IF (BTEST(Tfl%fType, bType_gen)) THEN
-
-!         For one element, get the activation time for each node
-          DO a = 1, eNoN
-              ta = ta + Tfl%gx(lIEN(a))
-!              ta = ta + fib_Act(lIEN(a))
-          END DO
-!         Average the activation time
-          ta = ta / eNoN
-
-          curr_time = mod(cTS, Tfl%cyc)
-!         The first 40% portion increasing g gradually to peak
-!         The last 60% portion decreasing g gradually to 0
-          increT = (Tfl%tl - Tfl%pl) * 0.4
-          IF ((curr_time .LE. ta) .OR. (curr_time .GT. ta + Tfl%tl))
-     2     THEN
-              g = 0
-          ELSE IF ((curr_time  .GT. ta ) .AND. 
-     2       (curr_time .LE. ta + increT)) THEN
-              g = Tfl%g * (curr_time - ta)/increT
-
-          ELSE IF((curr_time .GT. ta + Tfl%pl+ increT) .AND.
-     2     (curr_time .LE. ta + Tfl%tl)) THEN 
-              g = 5*Tfl%g * (ta+Tfl%tl-curr_time)/(Tfl%tl - Tfl%pl)/3
-
-          ELSE
-              g = Tfl%g 
-          END IF
-
-!          IF (cNE .EQ. 1 ) THEN
-!            PRINT*, "the cNE is ", cNE
-!            PRINT*, "the lIEN is ", lIEN
-!            DO a = 1, eNoN
-!                PRINT*, "the lIEN g is ", Tfl%gx(lIEN(a))
-!            END DO
-!            PRINT*, "the ta is ", ta
-!          END IF 
-
-!          IF (cNE .EQ. 10 ) THEN
-!            PRINT*, "the cNE is ", cNE
-!            PRINT*, "the lIEN is ", lIEN
-!            DO a = 1, eNoN
-!                PRINT*, "the lIEN g is ", Tfl%gx(lIEN(a))
-!            END DO
-!            PRINT*, "the ta is ", ta
-!          END IF 
-
-!          IF (cNE .EQ. 100) THEN
-!            PRINT*, "the cNE is ", cNE
-!            PRINT*, "the lIEN is ", lIEN
-!            DO a = 1, eNoN
-!                PRINT*, "the lIEN g is ", Tfl%gx(lIEN(a))
-!            END DO
-!            PRINT*, "the ta is ", ta
-!          END IF
-
       END IF
 
       RETURN

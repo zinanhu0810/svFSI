@@ -136,6 +136,14 @@
       ALLOCATE(lFa%gE(lFa%nEl))
       CALL getVTK_elemData(vtp, "GlobalElementID", lFa%gE, iStat)
       IF (iStat .LT. 0) THEN
+!        Stop if both GlobalNodeID and GlobalElementID are not provided
+!        If GlobalNodeID is not provided, then GlobalElementID is used
+!        to populate lFa%gN in CALCNBC subroutine.
+         IF (.NOT.ALLOCATED(lFa%gN)) THEN
+            err = " Could not find both GlobalNodeID and "//
+     2         "GlobalElementID in <"//TRIM(fName)//">"
+         END IF
+
          DEALLOCATE(lFa%gE)
          wrn = " Could not find GlobalElementID in the vtp file"
       ELSE
@@ -419,7 +427,7 @@
       LOGICAL :: lIbl, lD0
       INTEGER(KIND=IKIND) :: iStat, iEq, iOut, iM, a, e, Ac, Ec, nNo,
      2   nEl, s, l, ie, is, nSh, oGrp, outDof, nOut, cOut, ne, iFn, nFn,
-     3   nOute
+     3   nOute, iUris
       CHARACTER(LEN=stdL) :: fName
       TYPE(dataType) :: d(nMsh)
       TYPE(vtkXMLType) :: vtu
@@ -427,6 +435,7 @@
       INTEGER(KIND=IKIND), ALLOCATABLE :: outS(:), tmpI(:,:)
       REAL(KIND=RKIND), ALLOCATABLE :: tmpV(:,:), tmpVe(:)
       CHARACTER(LEN=stdL), ALLOCATABLE :: outNames(:), outNamesE(:)
+      CHARACTER(LEN=stdL) :: arrName
 
       lIbl = .FALSE.
       lD0  = .FALSE.
@@ -452,7 +461,7 @@
             IF (oGrp .EQ. outGrp_fN) THEN
                nFn = 1
                DO iM=1, nMsh
-                  nFn = MAX(nFn, msh(iM)%nFn)
+                  nFn = MAX(nFn, msh(iM)%fib%nFn)
                END DO
                nOut   = nOut + nFn
                outDof = outDof + eq(iEq)%output(iOut)%l * nFn
@@ -478,6 +487,11 @@
          outDof = outDof + nsd
       END IF
 
+!     SDF for each URIS      
+      IF (urisFlag) THEN
+          nOut = nOut + nUris
+          outDof = outDof + nUris
+      END IF
       ALLOCATE(outNames(nOut), outS(nOut+1), outNamesE(nOute))
 
 !     Prepare all solultions in to dataType d
@@ -544,6 +558,7 @@
                CASE (outGrp_D)
                   DO a=1, msh(iM)%nNo
                      Ac = msh(iM)%gN(a)
+                     ! Divide by mesh scale factor
                      d(iM)%x(is:ie,a) = lD(s:e,Ac)/msh(iM)%scF
                   END DO
 
@@ -572,7 +587,7 @@
                   IF (ALLOCATED(tmpV)) DEALLOCATE(tmpV)
                   ALLOCATE(tmpV(nFn*nsd,msh(iM)%nNo))
                   tmpV = 0._RKIND
-                  IF (msh(iM)%nFn .NE. 0) THEN
+                  IF (msh(iM)%fib%nFn .NE. 0) THEN
                      CALL FIBDIRPOST(msh(iM), nFn, tmpV, lD, iEq)
                   END IF
                   DO iFn=1, nFn
@@ -595,8 +610,11 @@
                   IF (ALLOCATED(tmpV)) DEALLOCATE(tmpV)
                   ALLOCATE(tmpV(1,msh(iM)%nNo))
                   tmpV = 0._RKIND
-                  IF (msh(iM)%nFn .EQ. 2) THEN
+                  IF (msh(iM)%fib%nFn .GE. 2) THEN
                      CALL FIBALGNPOST(msh(iM), tmpV, lD, iEq)
+                  ELSE
+                     err = " Fiber_alignment requires at least two "//
+     2                  "families of fibers"
                   END IF
                   DO a=1, msh(iM)%nNo
                      d(iM)%x(is,a) = tmpV(1,a)
@@ -638,8 +656,8 @@
                   DEALLOCATE(tmpV, tmpVe)
                   ALLOCATE(tmpV(maxnsd,msh(iM)%nNo))
 
-               CASE (outGrp_J, outGrp_F, outGrp_strain, outGrp_fS,
-     2               outGrp_C, outGrp_I1 )
+               CASE (outGrp_J, outGrp_F, outGrp_strain, outGrp_Ya,
+     2               outGrp_C, outGrp_I1)
                   IF (ALLOCATED(tmpV)) DEALLOCATE(tmpV)
                   ALLOCATE(tmpV(l,msh(iM)%nNo), tmpVe(msh(iM)%nEl))
                   tmpV  = 0._RKIND
@@ -675,6 +693,22 @@
                   DEALLOCATE(tmpV, tmpVe)
                   ALLOCATE(tmpV(maxnsd,msh(iM)%nNo))
 
+               CASE (outGrp_I4f)
+                  IF (ALLOCATED(tmpV)) DEALLOCATE(tmpV)
+                  ALLOCATE(tmpV(1,msh(iM)%nNo))
+                  tmpV = 0._RKIND
+
+                  IF (msh(iM)%fib%nFn .NE. 0) THEN
+                     CALL FIBSTRETCH(iEq, msh(iM), lD, tmpV)
+                  END IF
+
+                  DO a=1, msh(iM)%nNo
+                     d(iM)%x(is,a) = tmpV(1,a)
+                  END DO
+
+                  DEALLOCATE(tmpV)
+                  ALLOCATE(tmpV(maxnsd,msh(iM)%nNo))
+
                CASE (outGrp_divV)
                   IF (ALLOCATED(tmpV)) DEALLOCATE(tmpV)
                   ALLOCATE(tmpV(1,msh(iM)%nNo))
@@ -700,6 +734,19 @@
             DO a=1, msh(iM)%nNo
                Ac = msh(iM)%gN(a)
                d(iM)%x(is:ie,a) = REAL(iblank(Ac), KIND=RKIND)
+            END DO
+         END IF
+         IF (urisFlag) THEN
+            DO iUris=1, nUris
+                cOut           = cOut + 1
+                is             = outS(cOut)
+                ie             = is
+                outS(cOut+1)   = ie + 1
+                outNames(cOut) = "URIS_SDF_"//uris(iUris)%name
+                DO a=1, msh(iM)%nNo
+                   Ac = msh(iM)%gN(a)
+                   d(iM)%x(is:ie,a) = uris(iUris)%sdf(Ac)
+                END DO
             END DO
          END IF
       END DO

@@ -41,7 +41,7 @@
       USE ALLFUN
       IMPLICIT NONE
 
-      INTEGER(KIND=IKIND) iM, iFa, iEq, i, a, iBc, lsPtr
+      INTEGER(KIND=IKIND) iM, iFa, iEq, i, a, iBc, lsPtr, faIn, faInCap
 
       INTEGER(KIND=IKIND), ALLOCATABLE :: gNodes(:)
 
@@ -82,9 +82,13 @@
                cplBC%fa(i)%name = TRIM(msh(iM)%fa(iFa)%name)
                cplBC%fa(i)%y    = 0._RKIND
                IF (BTEST(eq(iEq)%bc(iBc)%bType,bType_Dir)) THEN
+!                 Set cplBC internal flag to Dirichlet
                   cplBC%fa(i)%bGrp = cplBC_Dir
                ELSE IF (BTEST(eq(iEq)%bc(iBc)%bType,bType_Neu)) THEN
+!                 Set cplBC internal flag to Neumann
                   cplBC%fa(i)%bGrp = cplBC_Neu
+!                 For implicit or semi-implicit coupling scheme,
+!                 set bType to resistance
                   IF (cplBC%schm .NE. cplBC_E) eq(iEq)%bc(iBc)%bType=
      2               IBSET(eq(iEq)%bc(iBc)%bType,bType_res)
 
@@ -112,6 +116,31 @@
             iM  = eq(iEq)%bc(iBc)%iM
             eq(iEq)%bc(iBc)%lsPtr = 0
             CALL FSILSINI(eq(iEq)%bc(iBc), msh(iM)%fa(iFa), lsPtr)
+!           Store mesh and face index in corresponding lhs%face(i). This
+!           explicitly maps mesh and face indices between lhs object
+!           (used in the linear solver for coupled surfaces) and the
+!           msh object. Used in MATCHFACE below.
+            IF (eq(iEq)%bc(iBc)%lsPtr .NE. 0) THEN
+               lhs%face(eq(iEq)%bc(iBc)%lsPtr)%iM  = iM
+               lhs%face(eq(iEq)%bc(iBc)%lsPtr)%iFa = iFa
+            END IF
+         END DO
+      END DO
+
+!     If any faces in msh(:)%fa(:) are capped, share information with
+!     lhs%face(:)
+      DO iEq=1,nEq
+         DO iBc=1, eq(iEq)%nBc
+            iFa = eq(iEq)%bc(iBc)%iFa
+            iM  = eq(iEq)%bc(iBc)%iM
+            IF (msh(iM)%fa(iFa)%capID .NE. 0) THEN
+!              Find lhs%face(:) index of face being capped
+               CALL MATCH_LHS_FACE(iM, iFa, faIn)
+!              Find lhs%face(:) index of capping face
+               CALL MATCH_LHS_FACE(iM, msh(iM)%fa(iFa)%capID, faInCap)
+!              Store capping relation in lhs%face(faIn)
+               lhs%face(faIn)%faInCap = faInCap
+            END IF
          END DO
       END DO
 
@@ -154,6 +183,35 @@
 
       RETURN
       END SUBROUTINE BAFINI
+!--------------------------------------------------------------------
+!     Find lhs%face(:) index faIn corresponding iM and iFa, which
+!     index msh(:)%fa(:)
+      SUBROUTINE MATCH_LHS_FACE(iM, iFa, faIn)
+      USE COMMOD
+      USE ALLFUN
+      IMPLICIT NONE
+      INTEGER(KIND=IKIND), INTENT(IN) :: iM, iFa
+      INTEGER(KIND=IKIND), INTENT(OUT) :: faIn
+
+      INTEGER(KIND=IKIND) i
+
+!     Loop over lhs%faces to find corresonding face
+      faIn = 0
+      DO i=1, lhs%nFaces
+!        If lhs%face matches mesh and face index,
+         IF ((lhs%face(i)%iFa .EQ. iFa)
+     2      .AND. (lhs%face(i)%iM .EQ. iM)) THEN
+            faIn = i
+            EXIT
+         END IF
+      END DO
+
+      IF (faIn .EQ. 0) THEN
+         err = " Cannot match LHS face and mesh indices."
+      END IF
+
+      RETURN
+      END SUBROUTINE MATCH_LHS_FACE
 !####################################################################
 !     Initializing faces
       SUBROUTINE FACEINI(lM, lFa)
@@ -183,7 +241,7 @@
       lFa%area = area
       DEALLOCATE(sA)
 
-!     Compute face normals at nodes
+!     Compute face normals at nodes, stored in nV
       IF (ALLOCATED(lFa%nV)) DEALLOCATE(lFa%nV)
       ALLOCATE(lFa%nV(nsd,lFa%nNo), sV(nsd,tnNo))
       sV = 0._RKIND
@@ -201,10 +259,15 @@
          DO e=1, lFa%nEl
             IF (lFa%eType .EQ. eType_NRB) CALL NRBNNXB(lM, lFa, e)
             DO g=1, lFa%nG
-               CALL GNNB(lFa, e, g, nsd-1, lFa%eNoN, lFa%Nx(:,:,g), nV)
+               CALL GNNB(lFa, e, g, nsd-1, lFa%eNoN, lFa%Nx(:,:,g), nV,
+     2            'r')
                DO a=1, lFa%eNoN
-                  Ac       = lFa%IEN(a,e)
-                  sV(:,Ac) = sV(:,Ac) + nV*lFa%N(a,g)*lFa%w(g)
+                  Ac = lFa%IEN(a,e)
+!                 Ac could equal zero on a virtual face
+                  IF (Ac .NE. 0) THEN
+!                    Compute integral of normal vector over face
+                     sV(:,Ac) = sV(:,Ac) + nV*lFa%N(a,g)*lFa%w(g)
+                  END IF
                END DO
             END DO
          END DO
@@ -270,7 +333,10 @@
 
                DO a=1, fs%eNoN
                   Ac = lFa%IEN(a,e)
-                  sV(:,Ac) = sV(:,Ac) + fs%w(g)*fs%N(a,g)*nV(:)
+                  IF (Ac .NE. 0) THEN
+!                    Compute integral of normal vector over face
+                     sV(:,Ac) = sV(:,Ac) + fs%w(g)*fs%N(a,g)*nV(:)
+                  END IF
                END DO
             END DO
 
@@ -290,13 +356,15 @@
                b  = a - fs%eNoN
                Ac = lFa%IEN(a,e)
                Bc = lFa%IEN(b,e)
-               nV = sV(:,Bc)
-               IF (b .EQ. fs%eNoN) THEN
-                  Bc = lFa%IEN(1,e)
-               ELSE
-                  Bc = lFa%IEN(b+1,e)
+               IF ((Ac .NE. 0) .AND. (Bc .NE. 0)) THEN
+                  nV = sV(:,Bc)
+                  IF (b .EQ. fs%eNoN) THEN
+                     Bc = lFa%IEN(1,e)
+                  ELSE
+                     Bc = lFa%IEN(b+1,e)
+                  END IF
+                  sV(:,Ac) = (nV + sV(:,Bc))*0.5_RKIND
                END IF
-               sV(:,Ac) = (nV + sV(:,Bc))*0.5_RKIND
             END DO
          END DO
          DEALLOCATE(xl, ptr, setIt)
@@ -483,6 +551,8 @@
       iM  = lFa%iM
       nNo = lFa%nNo
       ALLOCATE(sVl(nsd,nNo), sV(nsd,tnNo), gNodes(nNo))
+
+!     Copy mesh node id corresponding to face node id to gNodes
       DO a=1, nNo
          gNodes(a) = lFa%gN(a)
       END DO
@@ -511,26 +581,35 @@
      2         gNodes, sVl)
          END IF
       ELSE IF (BTEST(lBc%bType,bType_Neu)) THEN
+!        Compute integral of normal vector over face. Note that this
+!        function is only computed once at initialization
          IF (BTEST(lBc%bType,bType_res)) THEN
             sV = 0._RKIND
             DO e=1, lFa%nEl
                IF (lFa%eType .EQ. eType_NRB) CALL NRBNNXB(msh(iM),lFa,e)
                DO g=1, lFa%nG
-                  CALL GNNB(lFa, e, g, nsd-1, lFa%eNoN, lFa%Nx(:,:,g),n)
+                  CALL GNNB(lFa, e, g, nsd-1, lFa%eNoN, lFa%Nx(:,:,g),
+     2               n, 'r')
                   DO a=1, lFa%eNoN
                      Ac = lFa%IEN(a,e)
-                     sV(:,Ac) = sV(:,Ac) + lFa%N(a,g)*lFa%w(g)*n
+!                    For a virtual face, Ac can be 0
+                     IF (Ac .NE. 0) THEN
+!                       Integral of shape function times weighted normal
+                        sV(:,Ac) = sV(:,Ac) + lFa%N(a,g)*lFa%w(g)*n
+                     END IF
                   END DO
                END DO
             END DO
             DO a=1, lFa%nNo
-               Ac       = lFa%gN(a)
+               Ac = lFa%gN(a)
                sVl(:,a) = sV(:,Ac)
             END DO
             lsPtr     = lsPtr + 1
             lBc%lsPtr = lsPtr
+
+!           Fills lhs%face(i) variables, including val if sVl exists
             CALL FSILS_BC_CREATE(lhs, lsPtr, lFa%nNo, nsd, BC_TYPE_Neu,
-     2         gNodes, sVl)
+     2         gNodes, sVl, lFa%vrtual)
          ELSE
             lBc%lsPtr = 0
          END IF
@@ -751,3 +830,4 @@
       RETURN
       END SUBROUTINE SHLBCINI
 !####################################################################
+

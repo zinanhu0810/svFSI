@@ -34,13 +34,13 @@ include_directories(${SV_SOURCE_DIR}/ThirdParty/tetgen/simvascular_tetgen)
 include_directories(${MPI_C_INCLUDE_PATH})
 
 if(CMAKE_Fortran_COMPILER_ID MATCHES "GNU")
-   set(CMAKE_Fortran_FLAGS "-O3 -DNDEBUG -march=native")
-   set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -cpp -pthread -std=legacy")
+  set(CMAKE_Fortran_FLAGS "-O3 -DNDEBUG -march=native")
+  set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -cpp -pthread -std=legacy")
 
   # Use below flags for debugging
   # set(CMAKE_Fortran_FLAGS "-O0")
   # set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -cpp -pthread -std=legacy")
-  # set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -g -Wall -Wconversion -Wline-truncation -pedantic -fimplicit-none -fbacktrace -fbounds-check -p -fcheck=all -ffpe-trap=invalid,zero,overflow,underflow")
+  # set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -g -Wall -Wconversion -Wline-truncation -fimplicit-none -fbacktrace -fbounds-check -p -fcheck=all -ffpe-trap=invalid,zero,overflow,underflow")
 elseif(CMAKE_Fortran_COMPILER_ID MATCHES "Intel")
   set(CMAKE_Fortran_FLAGS "-O3 -march=native")
   set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -fpp -pthread")
@@ -131,6 +131,7 @@ set(FSRCS TYPEMOD.f
          EC_DCPLD.f
          EQASSEM.f
          FFT.f
+         FIBERS.f
          FLUID.f
          FS.f
          FSI.f
@@ -160,7 +161,9 @@ set(FSRCS TYPEMOD.f
          STOKES.f
          STRUCT.f
          TXT.f
+         URIS.f
          USTRUCT.f
+         VISC.f
          VTKXML.f)
 
 set(F90SRCS vtkComMod.f90

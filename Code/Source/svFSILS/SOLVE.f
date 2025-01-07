@@ -65,7 +65,6 @@
       nNo    = lhs%nNo
       nnz    = lhs%nnz
       nFaces = lhs%nFaces
-
       IF (lhs%nFaces .NE. 0) THEN
          lhs%face%incFlag = .TRUE.
          IF (PRESENT(incL)) THEN
